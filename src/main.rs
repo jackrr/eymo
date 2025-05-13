@@ -2,7 +2,6 @@ use anyhow::Result;
 use opencv::{core, highgui, imgproc, objdetect, prelude::*, videoio};
 
 fn main() -> Result<()> {
-    // Note, this is anyhow::Result
     highgui::named_window("window", highgui::WINDOW_FULLSCREEN)?;
 
     let mut cam = videoio::VideoCapture::new(0, videoio::CAP_ANY)?;

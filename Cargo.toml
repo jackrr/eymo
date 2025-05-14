@@ -5,5 +5,8 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.98"
+clap = "4.5.38"
+dlib-face-recognition = "0.3.2"
+image = "0.25.6"
 ndarray = "0.16.1"
 opencv = "0.94.4"

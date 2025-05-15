@@ -77,20 +77,20 @@ fn main() -> Result<()> {
                 &face_crop,
                 &mut face_128,
                 Size {
-                    width: 320,
-                    height: 320,
+                    width: 128,
+                    height: 128,
                 },
                 0.0,
                 0.0,
                 imgproc::INTER_AREA,
             )?;
             imgproc::cvt_color(&face_128, &mut face_rgb, imgproc::COLOR_BGR2RGB, 0)?;
-            face_rgb.convert_to(&mut face_float, core::CV_16F, 1.0, 0.0)?;
+            face_rgb.convert_to(&mut face_float, core::CV_32F, 1.0, 0.0)?;
             println!("Got image ready for tensoring {:?}", face_float);
 
             let tensor = Tensor::from_raw_buffer(
                 face_float.data_bytes()?,
-                DType::F16,
+                DType::F32,
                 &[face_rgb.rows() as usize, face_rgb.cols() as usize, 3],
                 &Device::Cpu,
             )?

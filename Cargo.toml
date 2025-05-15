@@ -5,5 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.98"
+candle-core = "0.9.1"
+candle-onnx = "0.9.1"
 ndarray = "0.16.1"
 opencv = "0.94.4"

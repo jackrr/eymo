@@ -1,44 +1,40 @@
 use anyhow::Result;
-use candle_core::{safetensors, DType, Device, Tensor};
-use candle_onnx;
+use ndarray::Array;
 use opencv::{
-    core::{self, Size},
+    core::{self, Mat, MatTraitConst, Size},
     highgui, imgproc, objdetect,
     prelude::*,
     videoio,
 };
-use std::collections::HashMap;
+use ort::session::{builder::GraphOptimizationLevel, Session};
+use ort::value::Tensor;
 
 fn main() -> Result<()> {
     highgui::named_window("window", highgui::WINDOW_FULLSCREEN)?;
 
     let mut cam = videoio::VideoCapture::new(0, videoio::CAP_ANY)?;
 
-    // Various stages of image processing
     let mut frame = Mat::default();
     let mut frame_gray = Mat::default();
-    let mut face_128 = Mat::default();
-    let mut face_rgb = Mat::default();
-    let mut face_float = Mat::default();
 
     let min_face_size = Size::new(50, 50);
     let max_face_size = Size::new(500, 500);
 
-    // https://github.com/opencv/opencv/blob/master/data/haarcascades/haarcascade_frontalface_default.xml
+    // src: https://github.com/opencv/opencv/blob/master/data/haarcascades/haarcascade_frontalface_default.xml
     let mut face_detector =
         objdetect::CascadeClassifier::new("./models/haarcascade_frontalface_default.xml")?;
 
+    // TODO: use yolov11
     // https://huggingface.co/qualcomm/Facial-Landmark-Detection/tree/main
-    // For some reason candle shits itself on this model, can't handle
-    // the pads on the MaxPool tensor
-    let model = candle_onnx::read_file("./models/Facial-Landmark-Detection.onnx")?;
-
-    // let face_model = safetensors::load(
-    //     "./models/diff_control_sd15_landmarks_fp16.safetensors",
-    //     &Device::Cpu,
-    // );
+    let model = Session::builder()?
+        .with_optimization_level(GraphOptimizationLevel::Level3)?
+        .with_intra_threads(4)?
+        .commit_from_file("./models/Facial-Landmark-Detection.onnx")?;
 
     loop {
+        // TODO:
+        // 1. render each stage (resized, cropped, model outputs in full) in window (for debugging)
+        // 2. do not advance frame until user input is given on prev
         cam.read(&mut frame)?;
         // 1. use opencv to find faces quickly
         imgproc::cvt_color(&frame.clone(), &mut frame_gray, imgproc::COLOR_BGR2GRAY, 0)?;
@@ -72,36 +68,45 @@ fn main() -> Result<()> {
             // and
             // https://github.com/quic/ai-hub-models/blob/v0.28.2/qai_hub_models/models/facemap_3dmm/model.py#L45-L58
             let face_crop = Mat::roi(&frame, face)?;
-
+            let mut face_resized = Mat::default();
+            let height = 128;
+            let width = 128;
             imgproc::resize(
                 &face_crop,
-                &mut face_128,
-                Size {
-                    width: 128,
-                    height: 128,
-                },
+                &mut face_resized,
+                Size { width, height },
                 0.0,
                 0.0,
                 imgproc::INTER_AREA,
             )?;
-            imgproc::cvt_color(&face_128, &mut face_rgb, imgproc::COLOR_BGR2RGB, 0)?;
-            face_rgb.convert_to(&mut face_float, core::CV_32F, 1.0, 0.0)?;
-            println!("Got image ready for tensoring {:?}", face_float);
 
-            let tensor = Tensor::from_raw_buffer(
-                face_float.data_bytes()?,
-                DType::F32,
-                &[face_rgb.rows() as usize, face_rgb.cols() as usize, 3],
-                &Device::Cpu,
-            )?
-            .permute((2, 0, 1))?
-            .unsqueeze(0)?;
-            println!("Made tensor!");
+            let mut face_f32 = Array::zeros((1, 3, 128, 128));
+            let height = face_resized.rows() as usize;
+            let width = face_resized.cols() as usize;
+            let chans = face_resized.channels() as usize;
 
-            let inputs: HashMap<String, Tensor> = HashMap::from([("image".to_string(), tensor)]);
-            let results = candle_onnx::simple_eval(&model, inputs)?;
-            println!("Made results!");
+            // b r g -> r g b
+            let chan_map = vec![2, 0, 1];
 
+            unsafe {
+                let mat_slice =
+                    std::slice::from_raw_parts(face_resized.data(), height * width * chans);
+
+                for y in 0..height {
+                    for x in 0..width {
+                        for ch in 0..chans {
+                            let idx = (y * width * chans) + (x * chans) + ch;
+                            face_f32[[0, chan_map[ch], y, x]] = (mat_slice[idx] as f32) / 255.;
+                        }
+                    }
+                }
+            }
+
+            let input = Tensor::from_array(face_f32)?;
+            let outputs = model.run(ort::inputs!["image" => input]?)?;
+            let results = outputs["parameters_3dmm"].try_extract_tensor::<f32>()?;
+            // uhhh wtf is this output
+            // https://github.com/quic/ai-hub-models/blob/v0.28.2/qai_hub_models/models/facemap_3dmm/utils.py#L14
             println!("Results! {:?}", results);
         }
 

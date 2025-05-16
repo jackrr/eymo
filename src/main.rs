@@ -1,21 +1,34 @@
 use anyhow::Result;
-use ndarray::Array;
+use ndarray::{Array, Dim, IxDynImpl, ViewRepr};
 use opencv::{
-    core::{self, Mat, MatTraitConst, Size},
+    core::{self, Mat, MatTraitConst, Point, Rect, Scalar, Size},
     highgui, imgproc, objdetect,
     prelude::*,
     videoio,
 };
 use ort::session::{builder::GraphOptimizationLevel, Session};
 use ort::value::Tensor;
+use std::cmp::{max, min};
+
+enum Model {
+    YoloV11PoseM = "yolo11m-pose.onnx",
+    YoloV11PoseS = "yolo11s-pose.onnx",
+    YoloV11PoseN = "yolo11n-pose.onnx",
+}
 
 fn main() -> Result<()> {
-    highgui::named_window("window", highgui::WINDOW_FULLSCREEN)?;
+    highgui::named_window("stream", highgui::WINDOW_AUTOSIZE)?;
+
+    // These seemingly don't work on wayland
+    // highgui::move_window("stream", 100, 100)?;
+    // highgui::move_window("face_crop", 1000, 100)?;
+    // highgui::move_window("face_resize", 1000, 800)?;
 
     let mut cam = videoio::VideoCapture::new(0, videoio::CAP_ANY)?;
 
     let mut frame = Mat::default();
     let mut frame_gray = Mat::default();
+    let mut face_resized = Mat::default();
 
     let min_face_size = Size::new(50, 50);
     let max_face_size = Size::new(500, 500);
@@ -24,17 +37,14 @@ fn main() -> Result<()> {
     let mut face_detector =
         objdetect::CascadeClassifier::new("./models/haarcascade_frontalface_default.xml")?;
 
-    // TODO: use yolov11
-    // https://huggingface.co/qualcomm/Facial-Landmark-Detection/tree/main
     let model = Session::builder()?
         .with_optimization_level(GraphOptimizationLevel::Level3)?
         .with_intra_threads(4)?
-        .commit_from_file("./models/Facial-Landmark-Detection.onnx")?;
+        .commit_from_file("./models/yolo11m-pose.onnx")?;
+
+    let mut has_result = false;
 
     loop {
-        // TODO:
-        // 1. render each stage (resized, cropped, model outputs in full) in window (for debugging)
-        // 2. do not advance frame until user input is given on prev
         cam.read(&mut frame)?;
         // 1. use opencv to find faces quickly
         imgproc::cvt_color(&frame.clone(), &mut frame_gray, imgproc::COLOR_BGR2GRAY, 0)?;
@@ -51,28 +61,26 @@ fn main() -> Result<()> {
         );
 
         for face in faces {
-            let _ = imgproc::rectangle(
-                &mut frame,
-                face,
-                core::VecN([255., 0., 0., 0.]),
-                1,
-                imgproc::LINE_8,
-                0,
-            );
-            println!("Found an face at {:?}", face);
+            // 2. use face bounding box to crop + resize crop to input size
+            // let face_region = expand_rect(face, 100, frame.cols(), frame.rows());
 
-            // 2. use face bounding box to crop + resize crop to 128 px
+            // let face_crop = Mat::roi(&frame, face_region)?;
 
-            // Riffing off of
-            // https://github.com/quic/ai-hub-models/blob/v0.28.2/qai_hub_models/models/facemap_3dmm/app.py#L63-L72
-            // and
-            // https://github.com/quic/ai-hub-models/blob/v0.28.2/qai_hub_models/models/facemap_3dmm/model.py#L45-L58
-            let face_crop = Mat::roi(&frame, face)?;
-            let mut face_resized = Mat::default();
-            let height = 128;
-            let width = 128;
+            // imgproc::rectangle(
+            //     &mut frame,
+            //     face_region,
+            //     core::VecN([255.0, 255.0, 0., 0.]),
+            //     1,
+            //     imgproc::LINE_8,
+            //     0,
+            // )?;
+
+            let height = 640;
+            let width = 640;
+
             imgproc::resize(
-                &face_crop,
+                // &face_crop,
+                &frame,
                 &mut face_resized,
                 Size { width, height },
                 0.0,
@@ -80,7 +88,7 @@ fn main() -> Result<()> {
                 imgproc::INTER_AREA,
             )?;
 
-            let mut face_f32 = Array::zeros((1, 3, 128, 128));
+            let mut face_f32 = Array::zeros((1, 3, height as usize, width as usize));
             let height = face_resized.rows() as usize;
             let width = face_resized.cols() as usize;
             let chans = face_resized.channels() as usize;
@@ -103,19 +111,161 @@ fn main() -> Result<()> {
             }
 
             let input = Tensor::from_array(face_f32)?;
-            let outputs = model.run(ort::inputs!["image" => input]?)?;
-            let results = outputs["parameters_3dmm"].try_extract_tensor::<f32>()?;
-            // uhhh wtf is this output
-            // https://github.com/quic/ai-hub-models/blob/v0.28.2/qai_hub_models/models/facemap_3dmm/utils.py#L14
-            println!("Results! {:?}", results);
+            let outputs = model.run(ort::inputs!["images" => input]?)?;
+            let results = outputs["output0"].try_extract_tensor::<f32>()?;
+            // show_results(&mut frame, results, face.x, face.y, )?;
+            show_results(&mut face_resized, results, 0, 0)?;
+
+            has_result = true;
         }
 
-        highgui::imshow("window", &frame)?;
-        let key = highgui::wait_key(1)?;
+        let mut wait_time = 1;
+
+        if has_result {
+            wait_time = 0;
+            highgui::imshow("stream", &face_resized)?;
+        } else {
+            highgui::imshow("stream", &frame)?;
+        }
+
+        let key = highgui::wait_key(wait_time)?;
         if key == 113 {
             // quit with q
             break;
         }
+
+        has_result = false;
     }
+
     Ok(())
+}
+
+fn show_results(
+    img: &mut Mat,
+    result: ndarray::ArrayBase<ViewRepr<&f32>, Dim<IxDynImpl>>,
+    x_offset: i32,
+    y_offset: i32,
+    model: Model,
+) -> Result<()> {
+    // yolov11n-pose: float32[1,56,2100]
+    // yolov11m-pose: float32[1,56,8400]
+    // yolov11m-pose: float32[1,56,8400]
+    let detection_size = 8400;
+    let detections = 56;
+
+    let res = result.as_slice();
+    let mut min_x = 10000000;
+    let mut max_x = -1;
+    let mut min_y = 10000000;
+    let mut max_y = -1;
+
+    match res {
+        Some(s) => {
+            for i in 0..detections {
+                let d_idx = i * detection_size;
+
+                let x = s[d_idx] as i32 + x_offset;
+                let y = s[d_idx + 1] as i32 + y_offset;
+                let w = s[d_idx + 2].round() as i32;
+                let h = s[d_idx + 3].round() as i32;
+
+                min_x = min(min_x, x);
+                max_x = max(max_x, x);
+
+                min_y = min(min_y, y);
+                max_y = max(max_y, y);
+
+                // confidence
+                let c = s[d_idx + 4];
+                if c < 70.0 {
+                    continue;
+                }
+
+                imgproc::rectangle(
+                    img,
+                    Rect::new(x, y, w, h),
+                    core::VecN([255., 0., 0., 0.]),
+                    1,
+                    imgproc::LINE_8,
+                    0,
+                )?;
+
+                // 17 keypoints: x,y,confidence
+                // Nose
+                // Left Eye
+                // Right Eye
+                // Left Ear
+                // Right Ear
+                // Left Shoulder
+                // Right Shoulder
+                // Left Elbow
+                // Right Elbow
+                // Left Wrist
+                // Right Wrist
+                // Left Hip
+                // Right Hip
+                // Left Knee
+                // Right Knee
+                // Left Ankle
+                // Right Ankle
+
+                for k in 0..17 {
+                    let k_idx = d_idx + (k * 3);
+                    let kx = s[k_idx].round() as i32 + x_offset;
+                    let ky = s[k_idx + 1].round() as i32 + y_offset;
+                    let kc = s[k_idx + 2];
+
+                    // if kc < 70.0 {
+                    //     continue;
+                    // }
+
+                    imgproc::circle(
+                        img,
+                        Point::new(kx, ky),
+                        5,
+                        Scalar::new(0., 0., 255., 0.),
+                        -1, // fill
+                        imgproc::LINE_8,
+                        0,
+                    )?;
+
+                    imgproc::put_text(
+                        img,
+                        &k.to_string(),
+                        Point::new(kx + 10, ky + 5),
+                        imgproc::FONT_HERSHEY_COMPLEX_SMALL,
+                        0.5,
+                        Scalar::new(255., 255., 255., 255.),
+                        1, //thickness
+                        imgproc::LINE_8,
+                        false,
+                    )?;
+                }
+                println!(
+                    "Result {:?}: {:?},{:?} {:?}x{:?} conf: {:?}",
+                    i, x, y, w, h, c
+                );
+            }
+        }
+        None => println!("Wheres the slice yo"),
+    }
+
+    println!("x: ({min_x:?},{max_x:?}), y: ({min_y:?},{max_y:?})");
+
+    Ok(())
+}
+
+fn expand_rect(rect: Rect, pad: i32, max_x: i32, max_y: i32) -> Rect {
+    let tl = Point::new(max(rect.x - pad, 0), max(rect.y - pad, 0));
+    let br = Point::new(
+        min(rect.x + rect.width + pad, max_x),
+        min(rect.y + rect.height + pad, max_y),
+    );
+
+    Rect {
+        x: tl.x,
+        y: tl.y,
+        width: br.x - tl.x,
+        height: br.y - tl.y,
+    }
 }

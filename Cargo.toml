@@ -7,6 +7,7 @@ edition = "2024"
 anyhow = "1.0.98"
 candle-core = "0.9.1"
 candle-onnx = "0.9.1"
+clap = { version = "4.5.38", features = ["derive"] }
 ndarray = "0.16.1"
 opencv = "0.94.4"
 ort = { version = "=2.0.0-rc.9", features = ["ndarray"] }

@@ -7,6 +7,14 @@ use std::collections::HashSet;
 use crate::cv::{detect_features, initialize_model};
 mod cv;
 
+use nokhwa::{
+    nokhwa_initialize,
+    pixel_format::{RgbAFormat, RgbFormat},
+    query,
+    utils::{ApiBackend, RequestedFormat, RequestedFormatType},
+    CallbackCamera,
+};
+
 const MODEL_YOLO_V11_POSE_M: &str = "yolo11m-pose.onnx";
 const MODEL_YOLO_V11_POSE_S: &str = "yolo11s-pose.onnx";
 const MODEL_YOLO_V11_POSE_N: &str = "yolo11n-pose.onnx";
@@ -50,15 +58,47 @@ fn main() -> Result<()> {
             let mut img = ImageReader::open(&p)?.decode()?;
             let result = detect_features(&model, &mut img)?;
             debug!("{result:?}");
-            img.save(output_path);
+            img.save(output_path)?;
             return Ok(());
         }
         None => debug!("No image specified, running in webcam mode"),
     }
 
-    // TODO: Stream mode from webcam
-    return Err(Error::msg("Stream mode not yet implemented"));
+    // Default mode: Webcam stream
 
-    // TODO: in debug mode, use a window to show output stream
-    // Ok(())
+    // only needs to be run on OSX
+    nokhwa_initialize(|granted| {
+        debug!("User said {}", granted);
+    });
+    // TODO: allow arg to specify device
+    let cameras = query(ApiBackend::Auto).unwrap();
+    cameras
+        .iter()
+        .for_each(|cam| debug!("Found camera: {:?}", cam));
+
+    let mut threaded = CallbackCamera::new(
+        cameras.last().unwrap().index().clone(),
+        RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate),
+        |buffer| {
+            // TODO: do the processing!
+            let image = buffer.decode_image::<RgbFormat>().unwrap();
+            println!("{}x{} {}", image.width(), image.height(), image.len());
+        },
+    )
+    .unwrap();
+    threaded.open_stream().unwrap();
+    #[allow(clippy::empty_loop)] // keep it running
+    loop {
+        // prob use ggez to make a canvas to draw each image to
+        // https://github.com/l1npengtul/nokhwa/blob/senpai/examples/capture/src/main.rs#L43-L74
+        // defer to _external_ process for translating shown window into camera stream (OSP, v4loopback, ffmpeg, etc)
+        let frame = threaded.poll_frame().unwrap();
+        let image = frame.decode_image::<RgbFormat>().unwrap();
+        println!(
+            "{}x{} {} naripoggers",
+            image.width(),
+            image.height(),
+            image.len()
+        );
+    }
 }

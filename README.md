@@ -2,21 +2,25 @@
 
 Ey(e)mo(uth) is a program that does fun things with a video stream of a face.
 
-## More accurate detection + mouth/other facial features
+## Getting models
 
-Switch from haar to a more contemporary system. Will try out candle
-(hugging face rust). Example to model off of here:
-https://github.com/huggingface/candle/tree/main/candle-examples/examples/yolo-v3
+1. Install `yolo` command line according to the [Ultralytics
+   docs](https://docs.ultralytics.com/quickstart/) (yes, you need
+   python...)
+2. Run `yolo export model=yolo11s-pose.pt format=onnx imgsz=640` and
+   copy the generated file to the `models/` directory
+   
+## TODO
 
-## Todo
-
-- Mouth detection
+- Mouth detection (maybe assume an offset from nose?)
 - Write to virtual camera detectable by other apps (browser cameras, zoom, etc)
 - Fun effects
   - Swap eyes and lips
   - Have eyes and lips rotate about the screen
-
+- Tracking -- do not re-run model on frame -- instead look for
+  telltale pixels to maintain a centerpoint + shape for the target
+  object
 
 ## Other idea spaces to explore
 
-- Background replacement
+- Add an image segmentation model for background replacement

@@ -1,7 +1,7 @@
 use anyhow::{Error, Result};
 use clap::Parser;
 use image::ImageReader;
-use log::debug;
+use log::{debug, info};
 use std::collections::HashSet;
 
 use crate::cv::{detect_features, initialize_model};
@@ -43,7 +43,7 @@ fn main() -> Result<()> {
     ]);
 
     let model_name: &str = &args.model.unwrap_or(MODEL_YOLO_V11_POSE_N.to_string());
-    let output_path: &str = &args.output_path.unwrap_or("result.png".to_string());
+    let output_path: &str = &args.output_path.unwrap_or("tmp/result.png".to_string());
 
     if models.contains(model_name) {
         debug!("Using model {model_name:?}");
@@ -59,6 +59,7 @@ fn main() -> Result<()> {
             let result = detect_features(&model, &mut img)?;
             debug!("{result:?}");
             img.save(output_path)?;
+            info!("Result at {:?}", output_path);
             return Ok(());
         }
         None => debug!("No image specified, running in webcam mode"),
@@ -76,7 +77,7 @@ fn main() -> Result<()> {
         .iter()
         .for_each(|cam| debug!("Found camera: {:?}", cam));
 
-    let mut threaded = CallbackCamera::new(
+    let mut camera = CallbackCamera::new(
         cameras.last().unwrap().index().clone(),
         RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate),
         |buffer| {
@@ -86,19 +87,14 @@ fn main() -> Result<()> {
         },
     )
     .unwrap();
-    threaded.open_stream().unwrap();
+    camera.open_stream().unwrap();
+
     #[allow(clippy::empty_loop)] // keep it running
     loop {
         // prob use ggez to make a canvas to draw each image to
-        // https://github.com/l1npengtul/nokhwa/blob/senpai/examples/capture/src/main.rs#L43-L74
+
         // defer to _external_ process for translating shown window into camera stream (OSP, v4loopback, ffmpeg, etc)
         let frame = threaded.poll_frame().unwrap();
         let image = frame.decode_image::<RgbFormat>().unwrap();
-        println!(
-            "{}x{} {} naripoggers",
-            image.width(),
-            image.height(),
-            image.len()
-        );
     }
 }

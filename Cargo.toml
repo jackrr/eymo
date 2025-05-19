@@ -7,6 +7,8 @@ edition = "2024"
 anyhow = "1.0.98"
 clap = { version = "4.5.38", features = ["derive"] }
 env_logger = "0.11.8"
+flume = "0.11.1"
+ggez = "0.9.3"
 image = "0.25.6"
 imageproc = "0.25.0"
 log = "0.4.27"

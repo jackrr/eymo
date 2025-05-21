@@ -7,12 +7,14 @@ mod keypoints;
 mod shapes;
 
 pub use crate::cv::keypoints::initialize_model;
+use crate::Run;
 
 pub fn detect_features(
     model: &keypoints::Session,
     img: &mut DynamicImage, // mut for debug mode
+    run: &mut Run,
 ) -> Result<Vec<Face>> {
-    let detections = keypoints::process_image(model, img)?;
+    let detections = keypoints::process_image(model, img, run)?;
     let mut faces: Vec<Face> = Vec::new();
 
     for d in detections {

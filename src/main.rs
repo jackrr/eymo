@@ -1,8 +1,13 @@
+#![warn(unused_extern_crates)]
+
 use anyhow::{Error, Result};
 use clap::Parser;
-use image::ImageReader;
-use log::{debug, info};
+use image::{DynamicImage, ImageReader};
+use log::{debug, info, warn};
+use ort::session::Session;
+use show_image::{create_window, ImageInfo, ImageView, WindowProxy};
 use std::collections::HashSet;
+use std::time;
 
 use crate::cv::{detect_features, initialize_model};
 mod cv;
@@ -12,8 +17,56 @@ use nokhwa::{
     pixel_format::{RgbAFormat, RgbFormat},
     query,
     utils::{ApiBackend, RequestedFormat, RequestedFormatType},
-    CallbackCamera,
+    Buffer, CallbackCamera,
 };
+
+struct Moment {
+    label: String,
+    at: time::Instant,
+}
+
+struct Run {
+    events: Vec<Moment>,
+}
+
+#[derive(debug)]
+struct Stats {
+    min: u128,
+    max: u128,
+    avg: f32,
+}
+
+impl Stats {
+    pub fn from_durations(ds: Vec<time::Duration>) -> Stats {
+        let nanos = ds.iter().map(|d| d.as_nanos());
+
+        Stats {
+            min: nanos.clone().reduce(|min, d| d.min(min)).unwrap_or(0),
+            max: nanos.clone().reduce(|max, d| d.max(max)).unwrap_or(0),
+            avg: nanos.reduce(|s, d| s + d).unwrap_or(0) as f32 / ds.len() as f32,
+        }
+    }
+}
+
+impl Run {
+    pub fn elapsed(
+        &self,
+        start_label: Option<String>,
+        end_label: Option<String>,
+    ) -> time::Duration {
+        let start = match start_label {
+            Some(s) => self.events.iter().find(|e| e.label == s).unwrap().at,
+            None => self.events.first().unwrap().at,
+        };
+
+        let end = match end_label {
+            Some(s) => self.events.iter().find(|e| e.label == s).unwrap().at,
+            None => self.events.last().unwrap().at,
+        };
+
+        end - start
+    }
+}
 
 const MODEL_YOLO_V11_POSE_M: &str = "yolo11m-pose.onnx";
 const MODEL_YOLO_V11_POSE_S: &str = "yolo11s-pose.onnx";
@@ -32,6 +85,7 @@ struct Args {
     output_path: Option<String>,
 }
 
+#[show_image::main]
 fn main() -> Result<()> {
     env_logger::init();
     let args = Args::parse();
@@ -56,7 +110,8 @@ fn main() -> Result<()> {
     match args.image_path {
         Some(p) => {
             let mut img = ImageReader::open(&p)?.decode()?;
-            let result = detect_features(&model, &mut img)?;
+            // TODO: uncomment me!
+            // let result = detect_features(&model, &mut img)?;
             debug!("{result:?}");
             img.save(output_path)?;
             info!("Result at {:?}", output_path);
@@ -77,24 +132,62 @@ fn main() -> Result<()> {
         .iter()
         .for_each(|cam| debug!("Found camera: {:?}", cam));
 
+    let (sender, receiver) = flume::unbounded();
+
     let mut camera = CallbackCamera::new(
         cameras.last().unwrap().index().clone(),
         RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate),
-        |buffer| {
-            // TODO: do the processing!
-            let image = buffer.decode_image::<RgbFormat>().unwrap();
-            println!("{}x{} {}", image.width(), image.height(), image.len());
+        move |buffer| {
+            sender
+                .send(buffer)
+                .expect("Error sending frame to buffer stream");
         },
     )
     .unwrap();
+
     camera.open_stream().unwrap();
+
+    let window = create_window("image", Default::default())?;
+
+    let mut runs = Vec::new();
 
     #[allow(clippy::empty_loop)] // keep it running
     loop {
-        // prob use ggez to make a canvas to draw each image to
+        // let pull_frame_at = time::Instant::now();
+        let frame = receiver.recv()?;
+        // ~1ms
+        let mut run = Run { events: Vec::new() };
+        run.events.push(Moment {
+            label: "frame_received".to_string(),
+            at: time::Instant::now(),
+        });
 
-        // defer to _external_ process for translating shown window into camera stream (OSP, v4loopback, ffmpeg, etc)
-        let frame = threaded.poll_frame().unwrap();
-        let image = frame.decode_image::<RgbFormat>().unwrap();
+        let mut image = DynamicImage::from(frame.decode_image::<RgbFormat>().unwrap());
+        run.events.push(Moment {
+            label: "frame_decoded".to_string(),
+            at: time::Instant::now(),
+        });
+
+        // ~45ms
+        let result = detect_features(&model, &mut image, &mut run)?;
+        run.events.push(Moment {
+            label: "features_built".to_string(),
+            at: time::Instant::now(),
+        });
+
+        // ~8ms
+        window.set_image("image", image)?;
+        run.events.push(Moment {
+            label: "frame_displayed".to_string(),
+            at: time::Instant::now(),
+        });
+
+        runs.push(run);
+
+        if runs.len() > 5 {
+            break;
+        }
     }
+
+    let full_stats = Stats::from_durations(runs.iter().map(|r| r.elapsed(None, None)));
 }

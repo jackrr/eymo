@@ -1,14 +1,11 @@
 use crate::cv::shapes::{overlap_pct, Detection, Keypoint, Point, Rect};
-use crate::{Moment, Run};
 use anyhow::Result;
 use image::{imageops::FilterType, DynamicImage, Pixel, Rgba};
 use imageproc::drawing;
-use log::{debug, info, log_enabled, Level};
+use log::{debug, info};
 use ndarray::{Array, Dim, IxDynImpl, ViewRepr};
 use ort::session::builder::GraphOptimizationLevel;
 use ort::value::Tensor;
-
-use std::time;
 
 pub use ort::session::Session;
 
@@ -26,7 +23,7 @@ const MIN_CONFIDENCE: f32 = 0.85;
 pub fn process_image(
     model: &Session,
     img: &mut DynamicImage,
-    run: &mut Run,
+    trace: bool,
 ) -> Result<Vec<Detection>> {
     let height = 640;
     let width = 640;
@@ -34,10 +31,6 @@ pub fn process_image(
 
     // ~ 20ms
     let resized = img.resize(width, height, FilterType::Triangle);
-    run.push(Moment {
-        label: "resized".to_string(),
-        at: time::Instant::now(),
-    });
 
     let resized_width = resized.width();
     let resized_height = resized.height();
@@ -53,10 +46,7 @@ pub fn process_image(
     let input = Tensor::from_array(model_input)?;
     // ~21ms
     let outputs = model.run(ort::inputs!["images" => input]?)?;
-    run.events.push(Moment {
-        label: "inferenced".to_string(),
-        at: time::Instant::now(),
-    });
+
     let result = outputs["output0"].try_extract_tensor::<f32>()?;
 
     let detections = process_result(
@@ -69,14 +59,9 @@ pub fn process_image(
         info!("No faces found.");
     }
 
-    if log_enabled!(Level::Debug) {
+    if trace {
         display_results(img, &detections);
     }
-
-    run.events.push(Moment {
-        label: "inference_decoded".to_string(),
-        at: time::Instant::now(),
-    });
 
     Ok(detections)
 }

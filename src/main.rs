@@ -4,69 +4,17 @@ use anyhow::{Error, Result};
 use clap::Parser;
 use image::{DynamicImage, ImageReader};
 use log::{debug, info, warn};
+use num_cpus::get as get_cpu_count;
 use ort::session::Session;
-use show_image::{create_window, ImageInfo, ImageView, WindowProxy};
 use std::collections::HashSet;
-use std::time;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
-use crate::cv::{detect_features, initialize_model};
+use crate::cv::{detect_features, initialize_model, shapes};
+use crate::video::process_frames;
 mod cv;
-
-use nokhwa::{
-    nokhwa_initialize,
-    pixel_format::{RgbAFormat, RgbFormat},
-    query,
-    utils::{ApiBackend, RequestedFormat, RequestedFormatType},
-    Buffer, CallbackCamera,
-};
-
-struct Moment {
-    label: String,
-    at: time::Instant,
-}
-
-struct Run {
-    events: Vec<Moment>,
-}
-
-#[derive(debug)]
-struct Stats {
-    min: u128,
-    max: u128,
-    avg: f32,
-}
-
-impl Stats {
-    pub fn from_durations(ds: Vec<time::Duration>) -> Stats {
-        let nanos = ds.iter().map(|d| d.as_nanos());
-
-        Stats {
-            min: nanos.clone().reduce(|min, d| d.min(min)).unwrap_or(0),
-            max: nanos.clone().reduce(|max, d| d.max(max)).unwrap_or(0),
-            avg: nanos.reduce(|s, d| s + d).unwrap_or(0) as f32 / ds.len() as f32,
-        }
-    }
-}
-
-impl Run {
-    pub fn elapsed(
-        &self,
-        start_label: Option<String>,
-        end_label: Option<String>,
-    ) -> time::Duration {
-        let start = match start_label {
-            Some(s) => self.events.iter().find(|e| e.label == s).unwrap().at,
-            None => self.events.first().unwrap().at,
-        };
-
-        let end = match end_label {
-            Some(s) => self.events.iter().find(|e| e.label == s).unwrap().at,
-            None => self.events.last().unwrap().at,
-        };
-
-        end - start
-    }
-}
+mod video;
 
 const MODEL_YOLO_V11_POSE_M: &str = "yolo11m-pose.onnx";
 const MODEL_YOLO_V11_POSE_S: &str = "yolo11s-pose.onnx";
@@ -75,7 +23,7 @@ const MODEL_YOLO_V11_POSE_N: &str = "yolo11n-pose.onnx";
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    #[arg(short, long)]
+    #[arg(long)]
     model: Option<String>,
 
     #[arg(short, long)]
@@ -83,6 +31,9 @@ struct Args {
 
     #[arg(short, long)]
     output_path: Option<String>,
+
+    #[arg(short, long)]
+    max_threads: Option<usize>,
 }
 
 #[show_image::main]
@@ -110,8 +61,7 @@ fn main() -> Result<()> {
     match args.image_path {
         Some(p) => {
             let mut img = ImageReader::open(&p)?.decode()?;
-            // TODO: uncomment me!
-            // let result = detect_features(&model, &mut img)?;
+            let result = detect_features(&model, &mut img, true)?;
             debug!("{result:?}");
             img.save(output_path)?;
             info!("Result at {:?}", output_path);
@@ -122,72 +72,60 @@ fn main() -> Result<()> {
 
     // Default mode: Webcam stream
 
-    // only needs to be run on OSX
-    nokhwa_initialize(|granted| {
-        debug!("User said {}", granted);
-    });
-    // TODO: allow arg to specify device
-    let cameras = query(ApiBackend::Auto).unwrap();
-    cameras
-        .iter()
-        .for_each(|cam| debug!("Found camera: {:?}", cam));
+    // TODO: allow arg to specify a video camera
+    let max_threads = get_cpu_count() / 3;
+    let face_state = Arc::new(Mutex::new(FaceState {
+        faces: Vec::new(),
+        calced_at: Instant::now(),
+        latest_frame: None,
+    }));
 
-    let (sender, receiver) = flume::unbounded();
+    let model_face_state = face_state.clone();
+    thread::spawn(move || -> Result<()> {
+        loop {
+            let mut f_state = model_face_state.lock().unwrap();
 
-    let mut camera = CallbackCamera::new(
-        cameras.last().unwrap().index().clone(),
-        RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate),
-        move |buffer| {
-            sender
-                .send(buffer)
-                .expect("Error sending frame to buffer stream");
-        },
-    )
-    .unwrap();
+            if let Some(mut image) = f_state.latest_frame.take() {
+                drop(f_state);
+                debug!("Re-running face detection model...");
+                let faces = detect_features(&model, &mut image, false)?;
 
-    camera.open_stream().unwrap();
-
-    let window = create_window("image", Default::default())?;
-
-    let mut runs = Vec::new();
-
-    #[allow(clippy::empty_loop)] // keep it running
-    loop {
-        // let pull_frame_at = time::Instant::now();
-        let frame = receiver.recv()?;
-        // ~1ms
-        let mut run = Run { events: Vec::new() };
-        run.events.push(Moment {
-            label: "frame_received".to_string(),
-            at: time::Instant::now(),
-        });
-
-        let mut image = DynamicImage::from(frame.decode_image::<RgbFormat>().unwrap());
-        run.events.push(Moment {
-            label: "frame_decoded".to_string(),
-            at: time::Instant::now(),
-        });
-
-        // ~45ms
-        let result = detect_features(&model, &mut image, &mut run)?;
-        run.events.push(Moment {
-            label: "features_built".to_string(),
-            at: time::Instant::now(),
-        });
-
-        // ~8ms
-        window.set_image("image", image)?;
-        run.events.push(Moment {
-            label: "frame_displayed".to_string(),
-            at: time::Instant::now(),
-        });
-
-        runs.push(run);
-
-        if runs.len() > 5 {
-            break;
+                // write updated faces into shared state
+                let mut f_state = model_face_state.lock().unwrap();
+                f_state.faces = faces;
+                f_state.calced_at = Instant::now();
+                drop(f_state)
+            } else {
+                drop(f_state);
+            }
+            thread::sleep(Duration::from_millis(1));
         }
-    }
 
-    let full_stats = Stats::from_durations(runs.iter().map(|r| r.elapsed(None, None)));
+        Ok(())
+    });
+
+    process_frames(
+        args.max_threads.unwrap_or(max_threads).min(max_threads),
+        &face_state.clone(),
+    )?;
+
+    Ok(())
+}
+
+struct FaceState {
+    faces: Vec<shapes::Face>,
+    calced_at: Instant,
+    latest_frame: Option<DynamicImage>,
+}
+
+fn process_frame(image: &mut DynamicImage, shared_state: &Arc<Mutex<FaceState>>) -> Result<()> {
+    let mut face_state = shared_state.lock().unwrap();
+    face_state.latest_frame = image.clone().into();
+    let faces = face_state.faces.clone();
+    drop(face_state); // free lock early
+
+    debug!("Have faces {:?}", faces);
+    // do stuff with faces and image here!
+
+    Ok(())
 }

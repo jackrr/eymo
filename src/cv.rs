@@ -4,21 +4,20 @@ use image::DynamicImage;
 use shapes::Face;
 mod face;
 mod keypoints;
-mod shapes;
+pub mod shapes;
 
 pub use crate::cv::keypoints::initialize_model;
-use crate::Run;
 
 pub fn detect_features(
     model: &keypoints::Session,
     img: &mut DynamicImage, // mut for debug mode
-    run: &mut Run,
+    trace: bool,
 ) -> Result<Vec<Face>> {
-    let detections = keypoints::process_image(model, img, run)?;
+    let detections = keypoints::process_image(model, img, trace)?;
     let mut faces: Vec<Face> = Vec::new();
 
     for d in detections {
-        faces.push(face_detection_to_features(d, img));
+        faces.push(face_detection_to_features(d, img, trace));
     }
 
     Ok(faces)

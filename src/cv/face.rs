@@ -5,7 +5,7 @@ use log::{debug, error, log_enabled, Level};
 
 use super::shapes::make_rect;
 
-pub fn face_detection_to_features(d: Detection, img: &mut DynamicImage) -> Face {
+pub fn face_detection_to_features(d: Detection, img: &mut DynamicImage, trace: bool) -> Face {
     let mut face = Face::new(d.face);
     let face_width = d.face.right() - d.face.left();
     let face_height = d.face.bottom() - d.face.top();
@@ -82,7 +82,7 @@ pub fn face_detection_to_features(d: Detection, img: &mut DynamicImage) -> Face 
         }
     }
 
-    if log_enabled!(Level::Debug) {
+    if trace {
         debug!("Displaying face features");
         display_face(img, &face);
     }

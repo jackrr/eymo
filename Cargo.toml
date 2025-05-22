@@ -13,5 +13,6 @@ imageproc = "0.25.0"
 log = "0.4.27"
 ndarray = "0.16.1"
 nokhwa = { version = "0.10.7", features = ["input-native", "input-jscam", "output-threaded"] }
+num_cpus = "1.16.0"
 ort = { version = "=2.0.0-rc.9", features = ["ndarray"] }
 show-image = { version = "0.14.1", features = ["image"] }

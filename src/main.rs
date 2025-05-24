@@ -1,11 +1,19 @@
+#![warn(unused_extern_crates)]
+
 use anyhow::{Error, Result};
 use clap::Parser;
-use image::ImageReader;
-use log::debug;
+use image::{DynamicImage, ImageReader};
+use log::{debug, info, warn};
+use num_cpus::get as get_cpu_count;
 use std::collections::HashSet;
+use std::sync::{Arc, Mutex, RwLock};
+use std::thread;
+use std::time::{Duration, Instant};
 
-use crate::cv::{detect_features, initialize_model};
+use crate::cv::{detect_features, initialize_model, shapes};
+use crate::video::process_frames;
 mod cv;
+mod video;
 
 const MODEL_YOLO_V11_POSE_M: &str = "yolo11m-pose.onnx";
 const MODEL_YOLO_V11_POSE_S: &str = "yolo11s-pose.onnx";
@@ -14,7 +22,7 @@ const MODEL_YOLO_V11_POSE_N: &str = "yolo11n-pose.onnx";
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    #[arg(short, long)]
+    #[arg(long)]
     model: Option<String>,
 
     #[arg(short, long)]
@@ -22,8 +30,12 @@ struct Args {
 
     #[arg(short, long)]
     output_path: Option<String>,
+
+    #[arg(short, long)]
+    max_threads: Option<usize>,
 }
 
+#[show_image::main]
 fn main() -> Result<()> {
     env_logger::init();
     let args = Args::parse();
@@ -35,7 +47,7 @@ fn main() -> Result<()> {
     ]);
 
     let model_name: &str = &args.model.unwrap_or(MODEL_YOLO_V11_POSE_N.to_string());
-    let output_path: &str = &args.output_path.unwrap_or("result.png".to_string());
+    let output_path: &str = &args.output_path.unwrap_or("tmp/result.png".to_string());
 
     if models.contains(model_name) {
         debug!("Using model {model_name:?}");
@@ -48,17 +60,91 @@ fn main() -> Result<()> {
     match args.image_path {
         Some(p) => {
             let mut img = ImageReader::open(&p)?.decode()?;
-            let result = detect_features(&model, &mut img)?;
+            let start = Instant::now();
+            let result = detect_features(&model, &mut img, true)?;
             debug!("{result:?}");
-            img.save(output_path);
+            debug!("Took {:?}", start.elapsed());
+            img.save(output_path)?;
+            info!("Result at {:?}", output_path);
             return Ok(());
         }
         None => debug!("No image specified, running in webcam mode"),
     }
 
-    // TODO: Stream mode from webcam
-    return Err(Error::msg("Stream mode not yet implemented"));
+    // Default mode: Webcam stream
 
-    // TODO: in debug mode, use a window to show output stream
-    // Ok(())
+    // TODO: allow arg to specify a video camera
+
+    let face_detection = Arc::new(RwLock::new(FaceDetection {
+        faces: Vec::new(),
+        calced_at: Instant::now(),
+    }));
+
+    let latest_img: Arc<Mutex<DetectionInput>> = Arc::new(Mutex::new(None));
+
+    let model_output = face_detection.clone();
+    let model_input = latest_img.clone();
+    thread::spawn(move || -> Result<()> {
+        loop {
+            let mut model_input = model_input.lock().unwrap();
+
+            if let Some(mut image) = model_input.take() {
+                drop(model_input);
+                debug!("Re-running face detection model...");
+                let faces = detect_features(&model, &mut image, false)?;
+
+                // write updated faces into shared state
+                let mut model_output = model_output.write().unwrap();
+                model_output.faces = faces;
+                debug!(
+                    "{:?} elapsed since last face detection run",
+                    model_output.calced_at.elapsed()
+                );
+                model_output.calced_at = Instant::now();
+                drop(model_output)
+            } else {
+                drop(model_input);
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+
+        Ok(())
+    });
+
+    // let max_threads = get_cpu_count() / 3;
+    let max_threads = 2;
+    process_frames(
+        args.max_threads.unwrap_or(max_threads).min(max_threads),
+        &face_detection.clone(),
+        &latest_img.clone(),
+    )?;
+
+    Ok(())
+}
+
+struct FaceDetection {
+    faces: Vec<shapes::Face>,
+    calced_at: Instant,
+}
+
+type DetectionInput = Option<DynamicImage>;
+
+fn process_frame(
+    within_ms: u32,
+    image: &mut DynamicImage,
+    face_detection: &Arc<RwLock<FaceDetection>>,
+) -> Result<()> {
+    let start = Instant::now();
+    let face_detection = face_detection.read().unwrap();
+    let faces = face_detection.faces.clone();
+    drop(face_detection); // free lock early
+
+    // Do this before every time consuming operation
+    if start.elapsed().as_millis() >= within_ms.into() {
+        return Ok(());
+    }
+    // debug!("Have faces {:?}", faces);
+    // do stuff with faces and image here!
+
+    Ok(())
 }

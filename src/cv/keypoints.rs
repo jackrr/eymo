@@ -1,8 +1,11 @@
+use std::time::Instant;
+
 use crate::cv::shapes::{overlap_pct, Detection, Keypoint, Point, Rect};
 use anyhow::Result;
 use image::{imageops::FilterType, DynamicImage, Pixel, Rgba};
-use imageproc::drawing;
-use log::{debug, info, log_enabled, Level};
+use imageproc::drawing::{self, Canvas};
+use log::{debug, info};
+use ndarray::parallel::prelude::IntoParallelRefMutIterator;
 use ndarray::{Array, Dim, IxDynImpl, ViewRepr};
 use ort::session::builder::GraphOptimizationLevel;
 use ort::value::Tensor;
@@ -20,25 +23,43 @@ pub fn initialize_model(model_file_path: &str) -> Result<Session> {
 
 const MIN_CONFIDENCE: f32 = 0.85;
 
-pub fn process_image(model: &Session, img: &mut DynamicImage) -> Result<Vec<Detection>> {
+pub fn process_image(
+    model: &Session,
+    img: &mut DynamicImage,
+    trace: bool,
+) -> Result<Vec<Detection>> {
     let height = 640;
     let width = 640;
-    let mut model_input = Array::zeros((1, 3, height as usize, width as usize));
 
-    let resized = img.resize(width, height, FilterType::Triangle);
+    let start = Instant::now();
+    // 175ms
+    let resized = img.resize(width, height, FilterType::Nearest);
+    debug!("Took {:?} to resize image", start.elapsed());
+
     let resized_width = resized.width();
     let resized_height = resized.height();
 
-    // TODO: consider threading this
-    for (x, y, pixel) in resized.into_rgb32f().enumerate_pixels() {
-        let chans = pixel.channels();
-        model_input[[0, 0, y as usize, x as usize]] = chans[0];
-        model_input[[0, 1, y as usize, x as usize]] = chans[1];
-        model_input[[0, 2, y as usize, x as usize]] = chans[2];
-    }
+    let start = Instant::now();
+    let model_input =
+        Array::from_shape_fn((1, 3, height as usize, width as usize), |(_, c, y, x)| {
+            let y: u32 = y as u32;
+            let x: u32 = x as u32;
+            if y >= resized_height {
+                0.
+            } else if x >= resized_width {
+                0.
+            } else {
+                resized.get_pixel(x, y)[c] as f32 / 255.0
+            }
+        });
+    debug!("Took {:?} to build ndarray", start.elapsed());
 
     let input = Tensor::from_array(model_input)?;
+
+    let start = Instant::now();
     let outputs = model.run(ort::inputs!["images" => input]?)?;
+    debug!("Took {:?} to run model", start.elapsed());
+
     let result = outputs["output0"].try_extract_tensor::<f32>()?;
 
     let detections = process_result(
@@ -51,7 +72,7 @@ pub fn process_image(model: &Session, img: &mut DynamicImage) -> Result<Vec<Dete
         info!("No faces found.");
     }
 
-    if log_enabled!(Level::Debug) {
+    if trace {
         display_results(img, &detections);
     }
 

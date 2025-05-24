@@ -2,7 +2,7 @@
 
 use anyhow::{Error, Result};
 use clap::Parser;
-use image::{DynamicImage, ImageReader};
+use image::{DynamicImage, GenericImage, GenericImageView, ImageReader};
 use log::{debug, info, warn};
 use num_cpus::get as get_cpu_count;
 use std::collections::HashSet;
@@ -10,7 +10,8 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::cv::{detect_features, initialize_model, shapes};
+use crate::cv::shapes::{Face, FaceFeatureKind, Rect};
+use crate::cv::{detect_features, initialize_model};
 use crate::video::process_frames;
 mod cv;
 mod video;
@@ -123,7 +124,7 @@ fn main() -> Result<()> {
 }
 
 struct FaceDetection {
-    faces: Vec<shapes::Face>,
+    faces: Vec<Face>,
     calced_at: Instant,
 }
 
@@ -131,7 +132,7 @@ type DetectionInput = Option<DynamicImage>;
 
 fn process_frame(
     within_ms: u32,
-    image: &mut DynamicImage,
+    img: &mut DynamicImage,
     face_detection: &Arc<RwLock<FaceDetection>>,
 ) -> Result<()> {
     let start = Instant::now();
@@ -143,8 +144,50 @@ fn process_frame(
     if start.elapsed().as_millis() >= within_ms.into() {
         return Ok(());
     }
-    // debug!("Have faces {:?}", faces);
-    // do stuff with faces and image here!
+
+    // swap mouth and eyes
+    for face in faces {
+        let mut mouth: Option<Rect> = None;
+        let mut l_eye: Option<Rect> = None;
+        let mut r_eye: Option<Rect> = None;
+        for f in face.features {
+            match f.kind {
+                FaceFeatureKind::Mouth => mouth = f.bounds.clone().into(),
+                FaceFeatureKind::LeftEye => l_eye = f.bounds.clone().into(),
+                FaceFeatureKind::RightEye => r_eye = f.bounds.clone().into(),
+                default => {}
+            }
+
+            let mouth = mouth.unwrap();
+            let l_eye = l_eye.unwrap();
+            let r_eye = r_eye.unwrap();
+
+            // mouth to leye
+            let mouth_view = *img.view(
+                mouth.left().try_into().unwrap(),
+                mouth.top().try_into().unwrap(),
+                mouth.width,
+                mouth.height,
+            );
+            let mut m_img = image::RgbaImage::new(mouth.width, mouth.height);
+            m_img.copy_from(&mouth_view, 0, 0)?;
+
+            img.copy_within(
+                l_eye.into(),
+                mouth.left().try_into().unwrap(),
+                mouth.top().try_into().unwrap(),
+            );
+            img.copy_from(&m_img, l_eye.left(), l_eye.top())?;
+            img.copy_from(&m_img, r_eye.left(), r_eye.top())?;
+
+            if start.elapsed().as_millis() >= within_ms.into() {
+                return Err(Error::msg(format!(
+                    "process_image exceeded allowed time of {}ms",
+                    within_ms
+                )));
+            }
+        }
+    }
 
     Ok(())
 }

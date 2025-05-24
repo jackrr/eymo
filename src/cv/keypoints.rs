@@ -1,11 +1,10 @@
 use std::time::Instant;
 
-use crate::cv::shapes::{overlap_pct, Detection, Keypoint, Point, Rect};
+use crate::cv::shapes::{Detection, Keypoint, Point, Rect};
 use anyhow::Result;
-use image::{imageops::FilterType, DynamicImage, Pixel, Rgba};
+use image::{imageops::FilterType, DynamicImage, Rgba};
 use imageproc::drawing::{self, Canvas};
 use log::{debug, info};
-use ndarray::parallel::prelude::IntoParallelRefMutIterator;
 use ndarray::{Array, Dim, IxDynImpl, ViewRepr};
 use ort::session::builder::GraphOptimizationLevel;
 use ort::value::Tensor;
@@ -93,16 +92,16 @@ fn process_result(
             continue;
         }
 
-        let xc = (row[0] * x_scale).round() as i32; // centerpoint x
-        let yc = (row[1] * y_scale).round() as i32; // centerpoint y
-        let w = (row[2] * x_scale).round() as i32;
-        let h = (row[3] * y_scale).round() as i32;
+        let xc = (row[0] * x_scale).round() as u32; // centerpoint x
+        let yc = (row[1] * y_scale).round() as u32; // centerpoint y
+        let w = (row[2] * x_scale).round() as u32;
+        let h = (row[3] * y_scale).round() as u32;
 
-        let face_loc = Rect::at(xc - w / 2, yc - h / 2).of_size(w as u32, h as u32);
+        let face_loc = Rect::from_center(Point::new(xc, yc), w, h);
 
         let mut has_better_dup = false;
         for (i, d) in detections.iter().enumerate() {
-            if overlap_pct(&face_loc, &d.face) > 20. {
+            if face_loc.overlap_pct(&d.face) > 20. {
                 // pick the one with higher confidence
                 if d.confidence > c {
                     has_better_dup = true;
@@ -132,8 +131,8 @@ fn process_result(
                 continue;
             }
 
-            let kx = (row[k_idx] * x_scale).round() as i32;
-            let ky = (row[k_idx + 1] * y_scale).round() as i32;
+            let kx = (row[k_idx] * x_scale).round() as u32;
+            let ky = (row[k_idx + 1] * y_scale).round() as u32;
 
             detection.keypoints.push(Keypoint {
                 feature_idx: k as u8,
@@ -152,12 +151,12 @@ fn display_results(img: &mut DynamicImage, detections: &Vec<Detection>) {
     info!("Writing detections to image");
 
     for d in detections {
-        drawing::draw_hollow_rect_mut(img, d.face, Rgba([255u8, 0u8, 0u8, 255u8]));
+        drawing::draw_hollow_rect_mut(img, d.face.into(), Rgba([255u8, 0u8, 0u8, 255u8]));
 
         for kp in &d.keypoints {
             drawing::draw_filled_circle_mut(
                 img,
-                (kp.point.x, kp.point.y),
+                (kp.point.x as i32, kp.point.y as i32),
                 10,
                 Rgba([0u8, 0u8, 255u8, 255u8]),
             );

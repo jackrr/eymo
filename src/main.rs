@@ -5,9 +5,8 @@ use clap::Parser;
 use image::{DynamicImage, ImageReader};
 use log::{debug, info, warn};
 use num_cpus::get as get_cpu_count;
-use ort::session::Session;
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -61,8 +60,10 @@ fn main() -> Result<()> {
     match args.image_path {
         Some(p) => {
             let mut img = ImageReader::open(&p)?.decode()?;
+            let start = Instant::now();
             let result = detect_features(&model, &mut img, true)?;
             debug!("{result:?}");
+            debug!("Took {:?}", start.elapsed());
             img.save(output_path)?;
             info!("Result at {:?}", output_path);
             return Ok(());
@@ -73,30 +74,36 @@ fn main() -> Result<()> {
     // Default mode: Webcam stream
 
     // TODO: allow arg to specify a video camera
-    let max_threads = get_cpu_count() / 3;
-    let face_state = Arc::new(Mutex::new(FaceState {
+
+    let face_detection = Arc::new(RwLock::new(FaceDetection {
         faces: Vec::new(),
         calced_at: Instant::now(),
-        latest_frame: None,
     }));
 
-    let model_face_state = face_state.clone();
+    let latest_img: Arc<Mutex<DetectionInput>> = Arc::new(Mutex::new(None));
+
+    let model_output = face_detection.clone();
+    let model_input = latest_img.clone();
     thread::spawn(move || -> Result<()> {
         loop {
-            let mut f_state = model_face_state.lock().unwrap();
+            let mut model_input = model_input.lock().unwrap();
 
-            if let Some(mut image) = f_state.latest_frame.take() {
-                drop(f_state);
+            if let Some(mut image) = model_input.take() {
+                drop(model_input);
                 debug!("Re-running face detection model...");
                 let faces = detect_features(&model, &mut image, false)?;
 
                 // write updated faces into shared state
-                let mut f_state = model_face_state.lock().unwrap();
-                f_state.faces = faces;
-                f_state.calced_at = Instant::now();
-                drop(f_state)
+                let mut model_output = model_output.write().unwrap();
+                model_output.faces = faces;
+                debug!(
+                    "{:?} elapsed since last face detection run",
+                    model_output.calced_at.elapsed()
+                );
+                model_output.calced_at = Instant::now();
+                drop(model_output)
             } else {
-                drop(f_state);
+                drop(model_input);
             }
             thread::sleep(Duration::from_millis(1));
         }
@@ -104,27 +111,39 @@ fn main() -> Result<()> {
         Ok(())
     });
 
+    // let max_threads = get_cpu_count() / 3;
+    let max_threads = 2;
     process_frames(
         args.max_threads.unwrap_or(max_threads).min(max_threads),
-        &face_state.clone(),
+        &face_detection.clone(),
+        &latest_img.clone(),
     )?;
 
     Ok(())
 }
 
-struct FaceState {
+struct FaceDetection {
     faces: Vec<shapes::Face>,
     calced_at: Instant,
-    latest_frame: Option<DynamicImage>,
 }
 
-fn process_frame(image: &mut DynamicImage, shared_state: &Arc<Mutex<FaceState>>) -> Result<()> {
-    let mut face_state = shared_state.lock().unwrap();
-    face_state.latest_frame = image.clone().into();
-    let faces = face_state.faces.clone();
-    drop(face_state); // free lock early
+type DetectionInput = Option<DynamicImage>;
 
-    debug!("Have faces {:?}", faces);
+fn process_frame(
+    within_ms: u32,
+    image: &mut DynamicImage,
+    face_detection: &Arc<RwLock<FaceDetection>>,
+) -> Result<()> {
+    let start = Instant::now();
+    let face_detection = face_detection.read().unwrap();
+    let faces = face_detection.faces.clone();
+    drop(face_detection); // free lock early
+
+    // Do this before every time consuming operation
+    if start.elapsed().as_millis() >= within_ms.into() {
+        return Ok(());
+    }
+    // debug!("Have faces {:?}", faces);
     // do stuff with faces and image here!
 
     Ok(())

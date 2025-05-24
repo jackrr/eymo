@@ -1,14 +1,13 @@
 use anyhow::{Error, Result};
 use image::DynamicImage;
-use log::{debug, info, warn};
-use ort::session::Session;
+use log::debug;
 use show_image::create_window;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
+use std::thread;
 use std::time::{Duration, Instant};
-use std::{any, thread};
 
-use crate::{process_frame, FaceState};
+use crate::{process_frame, DetectionInput, FaceDetection};
 
 use nokhwa::{
     nokhwa_initialize,
@@ -24,7 +23,13 @@ struct Frame {
     rec_at: Instant,
 }
 
-pub fn process_frames(max_threads: usize, shared_state: &Arc<Mutex<FaceState>>) -> Result<()> {
+const MIN_FPS: u32 = 30;
+
+pub fn process_frames(
+    max_threads: usize,
+    face_detection: &Arc<RwLock<FaceDetection>>,
+    latest_img: &Arc<Mutex<DetectionInput>>,
+) -> Result<()> {
     let (sender, receiver) = flume::unbounded();
 
     let (sender, receiver) = (Arc::new(sender), Arc::new(receiver));
@@ -35,7 +40,7 @@ pub fn process_frames(max_threads: usize, shared_state: &Arc<Mutex<FaceState>>) 
 
     let window = create_window("image", Default::default())?;
 
-    // Need to keep camera from being collected
+    // Need to keep camera in a var to prevent collection and maintain stream
     let camera = initialize_source_stream(&sender, input_frame_idx)?;
 
     let thread_count = max_threads - 1; // -1 for main
@@ -44,17 +49,22 @@ pub fn process_frames(max_threads: usize, shared_state: &Arc<Mutex<FaceState>>) 
         thread_count
     );
 
+    let ms_per_frame_per_thread = 1000 / MIN_FPS * u32::try_from(thread_count).unwrap();
     for i in 0..thread_count {
         let queued_frames = queued_frames.clone();
         let receiver = Arc::clone(&receiver);
-        let shared_state = Arc::clone(shared_state);
+        let face_detection = Arc::clone(face_detection);
+        let latest_img = Arc::clone(latest_img);
 
         thread::spawn(move || -> Result<()> {
             while !receiver.is_disconnected() {
                 let frame = receiver.recv()?;
                 let mut image = frame.image;
+                let mut latest_img = latest_img.lock().unwrap();
+                let _ = latest_img.insert(image.clone());
+                drop(latest_img);
 
-                process_frame(&mut image, &shared_state)?;
+                process_frame(ms_per_frame_per_thread, &mut image, &face_detection)?;
 
                 let mut frame_queue = queued_frames.lock().unwrap();
                 frame_queue.insert(frame.index, image);
@@ -72,6 +82,7 @@ pub fn process_frames(max_threads: usize, shared_state: &Arc<Mutex<FaceState>>) 
     let mut output_frame_idx = 0;
     let mut last_frame_at = Instant::now();
     let max_frame_delay = Duration::from_secs(10);
+
     loop {
         // TODO: frame rate logging
         let mut frame_queue = queued_frames.lock().unwrap();
@@ -126,7 +137,7 @@ fn initialize_source_stream(
             let index = frame_idx.clone();
 
             *frame_idx += 1;
-            drop(frame_idx); // free counter lock (i think)
+            drop(frame_idx);
 
             s.send(Frame {
                 image: DynamicImage::from(buffer.decode_image::<RgbFormat>().unwrap()),

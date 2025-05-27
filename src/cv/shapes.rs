@@ -1,5 +1,3 @@
-pub use imageproc::rect::Rect;
-
 #[derive(Debug, Copy, Clone)]
 pub enum FaceFeatureKind {
     LeftEar,
@@ -12,12 +10,12 @@ pub enum FaceFeatureKind {
 
 #[derive(Debug, Copy, Clone)]
 pub struct Point {
-    pub x: i32,
-    pub y: i32,
+    pub x: u32,
+    pub y: u32,
 }
 
 impl Point {
-    pub fn new(x: i32, y: i32) -> Point {
+    pub fn new(x: u32, y: u32) -> Point {
         Point { x, y }
     }
 }
@@ -71,31 +69,75 @@ pub struct Keypoint {
     pub confidence: f32,
 }
 
-pub fn overlap_pct(r1: &Rect, r2: &Rect) -> f32 {
-    let x_min = r1.left().max(r2.left());
-    let x_max = r1.right().min(r2.right());
-    let y_min = r1.top().max(r2.top());
-    let y_max = r1.bottom().min(r2.bottom());
+#[derive(Debug, Copy, Clone)]
+pub struct Rect {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
 
-    let overlap_area = if x_min < x_max && y_min < y_max {
-        (x_max - x_min) * (y_max - y_min)
-    } else {
-        0
-    };
-
-    let area_delta = area(r1) + area(r2) - overlap_area;
-
-    if area_delta > 0 {
-        overlap_area as f32 / area_delta as f32 * 100.
-    } else {
-        0.
+impl Into<image::math::Rect> for Rect {
+    fn into(self) -> image::math::Rect {
+        image::math::Rect {
+            x: self.x,
+            y: self.y,
+            width: self.width,
+            height: self.height,
+        }
     }
 }
 
-fn area(r: &Rect) -> i32 {
-    (r.right() - r.left()) * (r.bottom() - r.top())
+impl Into<imageproc::rect::Rect> for Rect {
+    fn into(self) -> imageproc::rect::Rect {
+        imageproc::rect::Rect::at(self.x as i32, self.y as i32).of_size(self.width, self.height)
+    }
 }
 
-pub fn make_rect(center: Point, width: i32, height: i32) -> Rect {
-    Rect::at(center.x - (width / 2), center.y - (height / 2)).of_size(width as u32, height as u32)
+impl Rect {
+    pub fn left(&self) -> u32 {
+        self.x
+    }
+    pub fn right(&self) -> u32 {
+        self.x + self.width
+    }
+    pub fn top(&self) -> u32 {
+        self.y
+    }
+    pub fn bottom(&self) -> u32 {
+        self.y + self.height
+    }
+    pub fn area(&self) -> u32 {
+        (self.right() - self.left()) * (self.bottom() - self.top())
+    }
+
+    pub fn from_center(center: Point, width: u32, height: u32) -> Rect {
+        Rect {
+            x: center.x - (width / 2),
+            y: center.y - (height / 2),
+            width,
+            height,
+        }
+    }
+
+    pub fn overlap_pct(self: &Rect, other: &Rect) -> f32 {
+        let x_min = self.x.max(other.x);
+        let x_max = self.right().min(other.right());
+        let y_min = self.y.max(other.y);
+        let y_max = self.bottom().min(other.bottom());
+
+        let overlap_area = if x_min < x_max && y_min < y_max {
+            (x_max - x_min) * (y_max - y_min)
+        } else {
+            0
+        };
+
+        let area_delta = self.area() + other.area() - overlap_area;
+
+        if area_delta > 0 {
+            overlap_area as f32 / area_delta as f32 * 100.
+        } else {
+            0.
+        }
+    }
 }

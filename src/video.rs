@@ -1,6 +1,6 @@
 use anyhow::{Error, Result};
 use image::DynamicImage;
-use log::debug;
+use log::{debug, warn};
 use show_image::create_window;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
@@ -64,7 +64,13 @@ pub fn process_frames(
                 let _ = latest_img.insert(image.clone());
                 drop(latest_img);
 
-                process_frame(ms_per_frame_per_thread, &mut image, &face_detection)?;
+                match process_frame(ms_per_frame_per_thread, &mut image, &face_detection) {
+                    Ok(_) => {}
+                    Err(err) => warn!(
+                        "Thread {} could not complete processing frame {}: {}",
+                        i, frame.index, err
+                    ),
+                }
 
                 let mut frame_queue = queued_frames.lock().unwrap();
                 frame_queue.insert(frame.index, image);

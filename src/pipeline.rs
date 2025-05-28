@@ -48,6 +48,7 @@ impl Pipeline {
 
     pub fn run(&self, img: &RgbImage) -> Result<()> {
         println!("TODO: implement me!");
+        let res = self.face_detector.run(img)?;
         Ok(())
     }
 
@@ -55,6 +56,7 @@ impl Pipeline {
         let res = self.face_detector.run(img)?;
         for face in res {
             drawing::draw_hollow_rect_mut(img, face.into(), Rgb([255u8, 0u8, 0u8]));
+            let res = self.face_landmarker.run(img, &face);
         }
 
         Ok(())

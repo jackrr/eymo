@@ -1,5 +1,4 @@
 // TODO: make rect generic to u32 or f32
-
 #[derive(Debug, Copy, Clone)]
 pub struct Rect {
     // centerpoint
@@ -29,6 +28,7 @@ impl Into<Rect> for RectF32 {
     }
 }
 
+#[allow(dead_code)]
 impl RectF32 {
     pub fn from_center(xc: f32, yc: f32, w: f32, h: f32) -> RectF32 {
         RectF32 { x: xc, y: yc, w, h }
@@ -79,6 +79,7 @@ impl Into<imageproc::rect::Rect> for Rect {
     }
 }
 
+#[allow(dead_code)]
 impl Rect {
     pub fn left(&self) -> u32 {
         self.x.saturating_sub(self.w / 2)
@@ -110,9 +111,9 @@ impl Rect {
     }
 
     pub fn overlap_pct(&self, other: &Rect) -> f32 {
-        let x_min = self.x.max(other.x);
+        let x_min = self.left().max(other.left());
         let x_max = self.right().min(other.right());
-        let y_min = self.y.max(other.y);
+        let y_min = self.top().max(other.top());
         let y_max = self.bottom().min(other.bottom());
 
         let overlap_area = if x_min < x_max && y_min < y_max {

@@ -4,6 +4,7 @@ use anchors::gen_anchors;
 use anyhow::Result;
 use image::imageops::{resize, FilterType};
 use image::RgbImage;
+use log::debug;
 use ndarray::Array;
 use ort::value::Tensor;
 
@@ -80,8 +81,8 @@ impl FaceDetector {
                 // TODO: gen_anchor needs work...
                 // let mut anchor = gen_anchor(row_idx.try_into().unwrap())?;
                 let mut anchor = self.anchors[row_idx].clone();
-                let mut adjusted = anchor.adjust(res[0], res[1], res[2], res[3]);
-                let scaled: Rect = adjusted
+                let scaled: Rect = anchor
+                    .adjust(res[0], res[1], res[2], res[3])
                     .scale(
                         img.width() as f32 / resized_width as f32,
                         img.height() as f32 / resized_height as f32,
@@ -105,6 +106,8 @@ impl FaceDetector {
             }
             row_idx += 1;
         }
+
+        debug!("Detected {} faces", results.len());
 
         Ok(results.iter().map(|(_, f)| *f).collect())
     }

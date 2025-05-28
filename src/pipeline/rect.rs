@@ -1,20 +1,72 @@
-use log::debug;
-
-use crate::pipeline::Point;
+// TODO: make rect generic to u32 or f32
 
 #[derive(Debug, Copy, Clone)]
 pub struct Rect {
+    // centerpoint
     pub x: u32,
     pub y: u32,
     pub w: u32,
     pub h: u32,
 }
 
+#[derive(Debug, Copy, Clone)]
+pub struct RectF32 {
+    // centerpoint
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+impl Into<Rect> for RectF32 {
+    fn into(self) -> Rect {
+        Rect {
+            x: self.x.round() as u32,
+            y: self.y.round() as u32,
+            w: self.w.round() as u32,
+            h: self.h.round() as u32,
+        }
+    }
+}
+
+impl RectF32 {
+    pub fn from_center(xc: f32, yc: f32, w: f32, h: f32) -> RectF32 {
+        RectF32 { x: xc, y: yc, w, h }
+    }
+
+    pub fn default() -> RectF32 {
+        RectF32 {
+            x: 1.,
+            y: 1.,
+            w: 1.,
+            h: 1.,
+        }
+    }
+
+    pub fn adjust(&mut self, dx: f32, dy: f32, dw: f32, dh: f32) -> RectF32 {
+        self.x += dx;
+        self.y += dy;
+        self.w = dw;
+        self.h = dh;
+
+        *self
+    }
+
+    pub fn scale(&mut self, scale_x: f32, scale_y: f32) -> RectF32 {
+        self.x *= scale_x;
+        self.y *= scale_y;
+        self.w *= scale_x;
+        self.h *= scale_y;
+
+        *self
+    }
+}
+
 impl Into<image::math::Rect> for Rect {
     fn into(self) -> image::math::Rect {
         image::math::Rect {
-            x: self.x,
-            y: self.y,
+            x: self.left(),
+            y: self.top(),
             width: self.w,
             height: self.h,
         }
@@ -23,38 +75,38 @@ impl Into<image::math::Rect> for Rect {
 
 impl Into<imageproc::rect::Rect> for Rect {
     fn into(self) -> imageproc::rect::Rect {
-        imageproc::rect::Rect::at(self.x as i32, self.y as i32).of_size(self.w, self.h)
+        imageproc::rect::Rect::at(self.left() as i32, self.top() as i32).of_size(self.w, self.h)
     }
 }
 
 impl Rect {
     pub fn left(&self) -> u32 {
-        self.x
+        self.x.saturating_sub(self.w / 2)
     }
     pub fn right(&self) -> u32 {
-        self.x + self.w
+        self.x + self.w / 2
     }
     pub fn top(&self) -> u32 {
-        self.y
+        self.y.saturating_sub(self.h / 2)
     }
     pub fn bottom(&self) -> u32 {
-        self.y + self.h
+        self.y + self.h / 2
     }
     pub fn area(&self) -> u32 {
-        (self.right() - self.left()) * (self.bottom() - self.top())
+        self.w * self.h
     }
 
-    pub fn new(x: u32, y: u32, w: u32, h: u32) -> Rect {
-        Rect { x, y, w, h }
-    }
-
-    pub fn from_center(center: Point, w: u32, h: u32) -> Rect {
+    pub fn from_tl(x: u32, y: u32, w: u32, h: u32) -> Rect {
         Rect {
-            x: center.x - (w / 2),
-            y: center.y - (h / 2),
+            x: x + w / 2,
+            y: y + h / 2,
             w,
             h,
         }
+    }
+
+    pub fn from_center(xc: u32, yc: u32, w: u32, h: u32) -> Rect {
+        Rect { x: xc, y: yc, w, h }
     }
 
     pub fn overlap_pct(&self, other: &Rect) -> f32 {
@@ -76,27 +128,5 @@ impl Rect {
         } else {
             0.
         }
-    }
-
-    pub fn adjust(&mut self, dx: i32, dy: i32, dw: i32, dh: i32) -> Rect {
-        debug!("before adjust {:?}", self);
-        self.x = (self.x as i32 + dx).abs() as u32;
-        self.y = (self.y as i32 + dy).abs() as u32;
-        self.w = (self.w as i32 + dw).abs() as u32;
-        self.h = (self.h as i32 + dh).abs() as u32;
-        debug!("after adjust {:?}", self);
-
-        *self
-    }
-
-    pub fn scale(&mut self, scale_x: f32, scale_y: f32) -> Rect {
-        debug!("before scale {:?}", self);
-        self.x = (self.x as f32 * scale_x).round() as u32;
-        self.y = (self.y as f32 * scale_y).round() as u32;
-        self.w = (self.w as f32 * scale_x).round() as u32;
-        self.h = (self.h as f32 * scale_y).round() as u32;
-        debug!("after scale {:?}", self);
-
-        *self
     }
 }

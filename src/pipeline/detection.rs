@@ -1,13 +1,11 @@
 use crate::pipeline::model::{initialize_model, Session};
-use crate::pipeline::rect::Rect;
+use crate::pipeline::rect::{Rect, RectF32};
+use anchors::gen_anchors;
 use anyhow::Result;
 use image::imageops::{resize, FilterType};
 use image::RgbImage;
-use log::debug;
 use ndarray::Array;
 use ort::value::Tensor;
-
-use crate::pipeline::detection::anchors::gen_anchor;
 
 mod anchors;
 
@@ -16,6 +14,7 @@ const HEIGHT: u32 = 128;
 
 pub struct FaceDetector {
     model: Session,
+    anchors: [RectF32; 896],
 }
 
 impl FaceDetector {
@@ -41,6 +40,7 @@ impl FaceDetector {
     pub fn new(threads: usize) -> Result<FaceDetector> {
         Ok(FaceDetector {
             model: initialize_model("mediapipe_face_detection_short_range.onnx", threads)?,
+            anchors: gen_anchors(),
         })
     }
 
@@ -51,7 +51,7 @@ impl FaceDetector {
         let resized_height = resized.height();
 
         let input_arr =
-            Array::from_shape_fn((1, WIDTH as usize, HEIGHT as usize, 3), |(_, x, y, c)| {
+            Array::from_shape_fn((1, HEIGHT as usize, WIDTH as usize, 3), |(_, y, x, c)| {
                 let x: u32 = x as u32;
                 let y: u32 = y as u32;
 
@@ -60,7 +60,7 @@ impl FaceDetector {
                 } else if x >= resized_width {
                     0.
                 } else {
-                    resized.get_pixel(x, y)[c] as f32 / 255.0
+                    (resized.get_pixel(x, y)[c] as f32 / 127.5) - 1. // -1.0 - 1.0 range
                 }
             });
 
@@ -77,33 +77,31 @@ impl FaceDetector {
         for res in detections.rows() {
             let score = sigmoid_stable(scores[row_idx]);
             if score > 0.5 {
-                debug!("{:?}", res);
-                let anchor = gen_anchor(row_idx.try_into().unwrap())?
-                    .adjust(
-                        res[0].round() as i32,
-                        res[1].round() as i32,
-                        res[2].round() as i32,
-                        res[3].round() as i32,
-                    )
+                // TODO: gen_anchor needs work...
+                // let mut anchor = gen_anchor(row_idx.try_into().unwrap())?;
+                let mut anchor = self.anchors[row_idx].clone();
+                let mut adjusted = anchor.adjust(res[0], res[1], res[2], res[3]);
+                let scaled: Rect = adjusted
                     .scale(
                         img.width() as f32 / resized_width as f32,
                         img.height() as f32 / resized_height as f32,
-                    );
+                    )
+                    .into();
 
-                // let mut better_found = false;
-                // for (i, (o_score, _o)) in results.iter().enumerate() {
-                //     // TODO: first verify overlap
-                //     if *o_score > score {
-                //         better_found = true;
-                //     } else {
-                //         results.swap_remove(i);
-                //     }
-                //     break;
-                // }
-                // if !better_found {
-                //
-                // }
-                results.push((score, anchor));
+                let mut better_found = false;
+                for (i, (o_score, o)) in results.iter().enumerate() {
+                    if o.overlap_pct(&scaled) > 30. {
+                        if *o_score > score {
+                            better_found = true;
+                        } else {
+                            results.swap_remove(i);
+                        }
+                        break;
+                    }
+                }
+                if !better_found {
+                    results.push((score, scaled));
+                }
             }
             row_idx += 1;
         }

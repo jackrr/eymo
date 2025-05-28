@@ -6,19 +6,7 @@ use image::{imageops::FilterType, DynamicImage, Rgba};
 use imageproc::drawing::{self, Canvas};
 use log::{debug, info};
 use ndarray::{Array, Dim, IxDynImpl, ViewRepr};
-use ort::session::builder::GraphOptimizationLevel;
 use ort::value::Tensor;
-
-pub use ort::session::Session;
-
-pub fn initialize_model(model_file_path: &str) -> Result<Session> {
-    let model = Session::builder()?
-        .with_optimization_level(GraphOptimizationLevel::Level3)?
-        .with_intra_threads(4)?
-        .commit_from_file(format!("./models/{model_file_path:}"))?;
-
-    Ok(model)
-}
 
 const MIN_CONFIDENCE: f32 = 0.85;
 

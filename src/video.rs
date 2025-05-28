@@ -1,5 +1,5 @@
 use anyhow::{Error, Result};
-use image::DynamicImage;
+use image::RgbImage;
 use log::{debug, warn};
 use show_image::create_window;
 use std::collections::HashMap;
@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::{process_frame, DetectionInput, FaceDetection};
+use crate::{process_frame, DetectionInput, DetectionResult};
 
 use nokhwa::{
     nokhwa_initialize,
@@ -18,7 +18,7 @@ use nokhwa::{
 };
 
 struct Frame {
-    image: DynamicImage,
+    image: RgbImage,
     index: u32,
     rec_at: Instant,
 }
@@ -27,15 +27,14 @@ const MIN_FPS: u32 = 30;
 
 pub fn process_frames(
     max_threads: usize,
-    face_detection: &Arc<RwLock<FaceDetection>>,
+    face_detection: &Arc<RwLock<DetectionResult>>,
     latest_img: &Arc<Mutex<DetectionInput>>,
 ) -> Result<()> {
     let (sender, receiver) = flume::unbounded();
 
     let (sender, receiver) = (Arc::new(sender), Arc::new(receiver));
 
-    let queued_frames: Arc<Mutex<HashMap<u32, DynamicImage>>> =
-        Arc::new(Mutex::new(HashMap::new()));
+    let queued_frames: Arc<Mutex<HashMap<u32, RgbImage>>> = Arc::new(Mutex::new(HashMap::new()));
     let input_frame_idx = Arc::new(Mutex::new(0));
 
     let window = create_window("image", Default::default())?;
@@ -146,7 +145,7 @@ fn initialize_source_stream(
             drop(frame_idx);
 
             s.send(Frame {
-                image: DynamicImage::from(buffer.decode_image::<RgbFormat>().unwrap()),
+                image: RgbImage::from(buffer.decode_image::<RgbFormat>().unwrap()),
                 index,
                 rec_at: Instant::now(),
             })

@@ -1,0 +1,121 @@
+use crate::pipeline::model::{initialize_model, Session};
+use crate::pipeline::rect::Rect;
+use anyhow::Result;
+use image::imageops::{resize, FilterType};
+use image::RgbImage;
+use log::debug;
+use ndarray::Array;
+use ort::value::Tensor;
+
+use crate::pipeline::detection::anchors::gen_anchor;
+
+mod anchors;
+
+const WIDTH: u32 = 128;
+const HEIGHT: u32 = 128;
+
+pub struct FaceDetector {
+    model: Session,
+}
+
+impl FaceDetector {
+    /*
+    BlazeFace model wrapper using ort to run the model, then manually
+    process the results into one or more faces
+
+
+    Model Input: 128x128 f32 image
+    Model Output:
+    - 896 length array of confidence scores (classificators)
+    - 896 length 2D array of detection coords (regressors)
+
+    The first 4 values in the detection coords are centroid, width,
+    height offsets applied to a particular cell among 2 predetermined
+    grids. The index in the 896 length array determines which square
+    in the grids is referred to.  The remaning 12 values are points
+    for key features (eyes, ears, etc).
+
+    // scale gets interpolated
+
+    */
+    pub fn new(threads: usize) -> Result<FaceDetector> {
+        Ok(FaceDetector {
+            model: initialize_model("mediapipe_face_detection_short_range.onnx", threads)?,
+        })
+    }
+
+    pub fn run(&self, img: &RgbImage) -> Result<Vec<Rect>> {
+        let resized = resize(img, WIDTH, HEIGHT, FilterType::Nearest);
+
+        let resized_width = resized.width();
+        let resized_height = resized.height();
+
+        let input_arr =
+            Array::from_shape_fn((1, WIDTH as usize, HEIGHT as usize, 3), |(_, x, y, c)| {
+                let x: u32 = x as u32;
+                let y: u32 = y as u32;
+
+                if y >= resized_height {
+                    0.
+                } else if x >= resized_width {
+                    0.
+                } else {
+                    resized.get_pixel(x, y)[c] as f32 / 255.0
+                }
+            });
+
+        let input = Tensor::from_array(input_arr)?;
+        let outputs = self.model.run(ort::inputs!["input" => input]?)?;
+        let regressors = outputs["regressors"].try_extract_tensor::<f32>()?;
+        let classificators = outputs["classificators"].try_extract_tensor::<f32>()?;
+        let scores = classificators.as_slice().unwrap();
+
+        let detections = regressors.squeeze();
+        let mut row_idx = 0;
+        let mut results: Vec<(f32, Rect)> = Vec::new();
+
+        for res in detections.rows() {
+            let score = sigmoid_stable(scores[row_idx]);
+            if score > 0.5 {
+                debug!("{:?}", res);
+                let anchor = gen_anchor(row_idx.try_into().unwrap())?
+                    .adjust(
+                        res[0].round() as i32,
+                        res[1].round() as i32,
+                        res[2].round() as i32,
+                        res[3].round() as i32,
+                    )
+                    .scale(
+                        img.width() as f32 / resized_width as f32,
+                        img.height() as f32 / resized_height as f32,
+                    );
+
+                // let mut better_found = false;
+                // for (i, (o_score, _o)) in results.iter().enumerate() {
+                //     // TODO: first verify overlap
+                //     if *o_score > score {
+                //         better_found = true;
+                //     } else {
+                //         results.swap_remove(i);
+                //     }
+                //     break;
+                // }
+                // if !better_found {
+                //
+                // }
+                results.push((score, anchor));
+            }
+            row_idx += 1;
+        }
+
+        Ok(results.iter().map(|(_, f)| *f).collect())
+    }
+}
+
+fn sigmoid_stable(x: f32) -> f32 {
+    if x >= 0. {
+        1. / (1. + (-x).exp())
+    } else {
+        x.exp() / (1. + x.exp())
+    }
+}

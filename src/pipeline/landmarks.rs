@@ -1,9 +1,10 @@
+use super::detection::Face;
 use super::model::{initialize_model, Session};
-use super::rect::Rect;
 use anyhow::Result;
 use image::imageops::{resize, FilterType};
-use image::{GenericImageView, Rgb, RgbImage};
+use image::{GenericImage, GenericImageView, Rgb, RgbImage};
 use imageproc::drawing;
+use imageproc::geometric_transformations::{rotate_about_center, Interpolation};
 use log::debug;
 use ndarray::Array;
 use ort::value::Tensor;
@@ -34,16 +35,28 @@ impl FaceLandmarker {
         })
     }
 
-    pub fn run(&self, img: &mut RgbImage, face: &Rect) -> Result<()> {
-        let mut face = face.clone();
+    pub fn run(&self, img: &mut RgbImage, face: &Face) -> Result<()> {
+        let mut bounds = face.bounds.clone();
         // pad 25% on each side
-        face.w = (face.w as f32 * 1.5).round() as u32;
-        face.h = (face.h as f32 * 1.5).round() as u32;
+        bounds.w = (bounds.w as f32 * 1.5).round() as u32;
+        bounds.h = (bounds.h as f32 * 1.5).round() as u32;
 
-        let view = img.view(face.left(), face.top(), face.w, face.h);
-        let resized = resize(&view, WIDTH, HEIGHT, FilterType::Nearest);
+        let rotated = rotate_about_center(
+            img,
+            -face.rot_theta(),
+            Interpolation::Nearest,
+            Rgb([0u8, 0u8, 0u8]),
+        );
+
+        let view = *rotated.view(bounds.left(), bounds.top(), bounds.w, bounds.h);
+        let mut face_img = RgbImage::new(bounds.w, bounds.h);
+        face_img.copy_from(&view, 0, 0)?;
+
+        let resized = resize(&face_img, WIDTH, HEIGHT, FilterType::Nearest);
         let resized_height = resized.height();
         let resized_width = resized.width();
+
+        resized.save("tmp/face.jpg")?;
         let input_arr =
             Array::from_shape_fn((1, HEIGHT as usize, WIDTH as usize, 3), |(_, y, x, c)| {
                 let x: u32 = x as u32;
@@ -64,21 +77,26 @@ impl FaceLandmarker {
         let output = outputs["conv2d_21"].try_extract_tensor::<f32>()?;
         let mesh = output.squeeze().squeeze().squeeze();
         debug!("{:?}", mesh);
-
         let r = mesh.as_slice().unwrap();
         let x_scale = img.width() as f32 / resized_width as f32;
         let y_scale = img.height() as f32 / resized_height as f32;
+
+        // TODO: unrotate output
+        // FIXME: strange scale issue
+        // TODO: find indices that correspond to mouth, nose, eye boundaries
+
         for i in 0..mesh.len() / 3 {
-            let x = face.left() as f32 + r[i] * x_scale;
-            let y = face.top() as f32 + r[i + 1] * y_scale;
+            let idx = i * 3;
+            let x = bounds.left() as f32 + r[idx] * x_scale;
+            let y = bounds.top() as f32 + r[idx + 1] * y_scale;
             let p = Point::new(x.round() as u32, y.round() as u32);
             debug!("{}x{}", p.x, p.y);
 
             drawing::draw_filled_circle_mut(
                 img,
                 (p.x as i32, p.y as i32),
-                1,
-                Rgb([0u8, 0u8, 255u8]),
+                2,
+                Rgb([255u8, 255u8, 255u8]),
             );
         }
 

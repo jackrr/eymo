@@ -1,5 +1,6 @@
-use crate::pipeline::model::{initialize_model, Session};
-use crate::pipeline::rect::{Rect, RectF32};
+use super::model::{initialize_model, Session};
+use super::rect::{Rect, RectF32};
+use super::PointF32;
 use anchors::gen_anchors;
 use anyhow::Result;
 use image::imageops::{resize, FilterType};
@@ -16,6 +17,31 @@ const HEIGHT: u32 = 128;
 pub struct FaceDetector {
     model: Session,
     anchors: [RectF32; 896],
+}
+
+#[derive(Debug, Clone)]
+pub struct Face {
+    pub bounds: Rect,
+    pub l_eye: PointF32,
+    pub r_eye: PointF32,
+    confidence: f32,
+}
+
+impl Face {
+    pub fn with_eyes(confidence: f32, bounds: Rect, l_eye: PointF32, r_eye: PointF32) -> Face {
+        Face {
+            l_eye,
+            r_eye,
+            bounds,
+            confidence,
+        }
+    }
+
+    pub fn rot_theta(&self) -> f32 {
+        let dx = self.r_eye.x - self.l_eye.x;
+        let dy = self.r_eye.y - self.l_eye.y;
+        dy.atan2(dx)
+    }
 }
 
 impl FaceDetector {
@@ -45,7 +71,7 @@ impl FaceDetector {
         })
     }
 
-    pub fn run(&self, img: &RgbImage) -> Result<Vec<Rect>> {
+    pub fn run(&self, img: &RgbImage) -> Result<Vec<Face>> {
         let resized = resize(img, WIDTH, HEIGHT, FilterType::Nearest);
 
         let resized_width = resized.width();
@@ -73,26 +99,29 @@ impl FaceDetector {
 
         let detections = regressors.squeeze();
         let mut row_idx = 0;
-        let mut results: Vec<(f32, Rect)> = Vec::new();
+        let mut results: Vec<Face> = Vec::new();
 
         for res in detections.rows() {
             let score = sigmoid_stable(scores[row_idx]);
             if score > 0.5 {
+                let x_scale = img.width() as f32 / resized_width as f32;
+                let y_scale = img.height() as f32 / resized_height as f32;
+
                 // TODO: gen_anchor needs work...
                 // let mut anchor = gen_anchor(row_idx.try_into().unwrap())?;
                 let mut anchor = self.anchors[row_idx].clone();
+                let ax = anchor.x.clone();
+                let ay = anchor.y.clone();
+
                 let scaled: Rect = anchor
                     .adjust(res[0], res[1], res[2], res[3])
-                    .scale(
-                        img.width() as f32 / resized_width as f32,
-                        img.height() as f32 / resized_height as f32,
-                    )
+                    .scale(x_scale, y_scale)
                     .into();
 
                 let mut better_found = false;
-                for (i, (o_score, o)) in results.iter().enumerate() {
-                    if o.overlap_pct(&scaled) > 30. {
-                        if *o_score > score {
+                for (i, d) in results.iter().enumerate() {
+                    if d.bounds.overlap_pct(&scaled) > 30. {
+                        if d.confidence > score {
                             better_found = true;
                         } else {
                             results.swap_remove(i);
@@ -101,7 +130,15 @@ impl FaceDetector {
                     }
                 }
                 if !better_found {
-                    results.push((score, scaled));
+                    let l_eye = PointF32 {
+                        x: ((ax + res[4]) * x_scale),
+                        y: ((ay + res[5]) * y_scale),
+                    };
+                    let r_eye = PointF32 {
+                        x: ((ax + res[6]) * x_scale),
+                        y: ((ay + res[7]) * y_scale),
+                    };
+                    results.push(Face::with_eyes(score, scaled, l_eye, r_eye));
                 }
             }
             row_idx += 1;
@@ -109,7 +146,7 @@ impl FaceDetector {
 
         debug!("Detected {} faces", results.len());
 
-        Ok(results.iter().map(|(_, f)| *f).collect())
+        Ok(results)
     }
 }
 

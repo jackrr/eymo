@@ -4,6 +4,7 @@ use image::{Rgb, RgbImage};
 use detection::FaceDetector;
 use imageproc::drawing;
 use landmarks::FaceLandmarker;
+use log::debug;
 
 mod detection;
 mod landmarks;
@@ -13,6 +14,12 @@ mod rect;
 pub struct Pipeline {
     face_detector: FaceDetector,
     face_landmarker: FaceLandmarker,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PointF32 {
+    pub x: f32,
+    pub y: f32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -27,7 +34,7 @@ pub struct Feature {
 }
 
 #[derive(Debug, Clone)]
-pub struct Face {
+pub struct FaceFeatures {
     pub left_eye: Option<Feature>,
     pub right_eye: Option<Feature>,
     pub mouth: Option<Feature>,
@@ -35,7 +42,7 @@ pub struct Face {
 
 #[derive(Debug, Clone)]
 pub struct Detection {
-    pub faces: Vec<Face>,
+    pub faces: Vec<FaceFeatures>,
 }
 
 impl Pipeline {
@@ -55,8 +62,21 @@ impl Pipeline {
     pub fn run_trace(&self, img: &mut RgbImage) -> Result<()> {
         let res = self.face_detector.run(img)?;
         for face in res {
-            drawing::draw_hollow_rect_mut(img, face.into(), Rgb([255u8, 0u8, 0u8]));
             let res = self.face_landmarker.run(img, &face);
+            debug!("{face:?}");
+            drawing::draw_hollow_rect_mut(img, face.bounds.into(), Rgb([255u8, 0u8, 0u8]));
+            drawing::draw_filled_circle_mut(
+                img,
+                (face.l_eye.x as i32, face.l_eye.y as i32),
+                10,
+                Rgb([0u8, 255u8, 0u8]),
+            );
+            drawing::draw_filled_circle_mut(
+                img,
+                (face.r_eye.x as i32, face.r_eye.y as i32),
+                10,
+                Rgb([255u8, 0u8, 0u8]),
+            );
         }
 
         Ok(())

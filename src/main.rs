@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use crate::pipeline::Pipeline;
 use crate::video::process_frames;
+mod manipulation;
 mod pipeline;
 mod video;
 
@@ -37,21 +38,36 @@ fn main() -> Result<()> {
     let total_threads = args.max_threads.unwrap_or(total_threads).min(total_threads);
     let pipeline = Pipeline::new(total_threads / 2)?;
 
-    match args.image_path {
-        Some(p) => {
-            let mut img = ImageReader::open(&p)?.decode()?.into_rgb8();
-            let start = Instant::now();
-            let result = pipeline.run_trace(&mut img);
-            debug!("{result:?}");
-            debug!("Took {:?}", start.elapsed());
+    for path in ["steve.png"] {
+        // for path in ["selfie.png", "family.jpg", "steve.png"] {
+        let mut img = ImageReader::open(&("tmp/".to_owned() + path))?
+            .decode()?
+            .into_rgb8();
+        let start = Instant::now();
+        let result = pipeline.run_trace(&mut img);
+        debug!("{result:?}");
+        debug!("Took {:?}", start.elapsed());
 
-            let output_path: &str = &args.output_path.unwrap_or("tmp/result.png".to_string());
-            img.save(output_path)?;
-            info!("Result at {:?}", output_path);
-            return Ok(());
-        }
-        None => debug!("No image specified, running in webcam mode"),
+        img.save("tmp/out-".to_owned() + path)?;
+        debug!("Result at {:?}", "tmp/out-".to_owned() + path);
     }
+    return Ok(());
+
+    // match args.image_path {
+    //     Some(p) => {
+    //         let mut img = ImageReader::open(&p)?.decode()?.into_rgb8();
+    //         let start = Instant::now();
+    //         let result = pipeline.run_trace(&mut img);
+    //         debug!("{result:?}");
+    //         debug!("Took {:?}", start.elapsed());
+
+    //         let output_path: &str = &args.output_path.unwrap_or("tmp/result.png".to_string());
+    //         img.save(output_path)?;
+    //         info!("Result at {:?}", output_path);
+    //         return Ok(());
+    //     }
+    //     None => debug!("No image specified, running in webcam mode"),
+    // }
 
     // Default mode: Webcam stream
 

@@ -5,6 +5,7 @@ use detection::FaceDetector;
 use imageproc::drawing;
 use landmarks::FaceLandmarker;
 use log::debug;
+use rect::Point;
 
 mod detection;
 mod landmarks;
@@ -14,18 +15,6 @@ mod rect;
 pub struct Pipeline {
     face_detector: FaceDetector,
     face_landmarker: FaceLandmarker,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct PointF32 {
-    pub x: f32,
-    pub y: f32,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Point {
-    pub x: u32,
-    pub y: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -68,13 +57,13 @@ impl Pipeline {
             drawing::draw_filled_circle_mut(
                 img,
                 (face.l_eye.x as i32, face.l_eye.y as i32),
-                10,
+                3,
                 Rgb([0u8, 255u8, 0u8]),
             );
             drawing::draw_filled_circle_mut(
                 img,
                 (face.r_eye.x as i32, face.r_eye.y as i32),
-                10,
+                3,
                 Rgb([255u8, 0u8, 0u8]),
             );
         }

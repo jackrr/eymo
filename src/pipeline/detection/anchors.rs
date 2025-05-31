@@ -1,4 +1,4 @@
-use crate::pipeline::rect::RectF32;
+use crate::shapes::rect::RectF32;
 use anyhow::{Error, Result};
 use log::debug;
 

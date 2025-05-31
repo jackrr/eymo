@@ -1,11 +1,12 @@
-use super::detection::Face;
+use super::detection;
 use super::model::{initialize_model, Session};
-use super::rect::Point;
+use super::Face;
+use crate::shapes::npoint::NPoint;
+use crate::shapes::point::Point;
 use ab_glyph::FontRef;
 use anyhow::Result;
 use image::imageops::{resize, FilterType};
 use image::{GenericImage, GenericImageView, Rgb, RgbImage};
-use imageproc::drawing;
 use imageproc::geometric_transformations::{rotate_about_center, Interpolation};
 use log::debug;
 use ndarray::Array;
@@ -19,12 +20,20 @@ pub struct FaceLandmarker {
 const HEIGHT: u32 = 192;
 const WIDTH: u32 = 192;
 
-const MOUTH_IDXS: [usize; 5] = [
-    171, 558, 276, 495, 501, 492, 1179, 1173, 966, 1230, 861, 1266,
+// TODO: get a "canonical" detection to dial in these landmark indices
+const MOUTH_IDXS: [usize; 20] = [
+    212, 186, 92, 165, 167, 164, 393, 391, 322, 410, 287, 422, 424, 418, 421, 200, 201, 194, 204,
+    202,
 ];
-// const L_EYE_IDXS: [usize; 5] = [];
-// const R_EYE_IDXS: [usize; 5] = [];
-// const NOSE_IDXS: [usize; 5] = [];
+const L_EYE_IDXS: [usize; 15] = [
+    226, 247, 30, 29, 27, 28, 56, 190, 243, 233, 121, 120, 119, 118, 31,
+];
+const R_EYE_IDXS: [usize; 16] = [
+    6, 417, 441, 442, 443, 444, 445, 353, 356, 261, 448, 449, 450, 451, 452, 351,
+];
+const NOSE_IDXS: [usize; 18] = [
+    189, 193, 168, 6, 197, 195, 5, 275, 274, 393, 164, 167, 165, 203, 129, 126, 114, 244,
+];
 
 impl FaceLandmarker {
     pub fn new(threads: usize) -> Result<FaceLandmarker> {
@@ -37,7 +46,7 @@ impl FaceLandmarker {
         })
     }
 
-    pub fn run(&self, img: &mut RgbImage, face: &Face) -> Result<()> {
+    pub fn run(&self, img: &RgbImage, face: &detection::Face) -> Result<Face> {
         let mut bounds = face.bounds.clone();
         // pad 25% on each side
         bounds.w = (bounds.w as f32 * 1.5).round() as u32;
@@ -83,53 +92,72 @@ impl FaceLandmarker {
 
         let x_scale = face_img.width() as f32 / input_img_width as f32;
         let y_scale = face_img.height() as f32 / input_img_height as f32;
+        let x_offset = bounds.left() as f32;
+        let y_offset = bounds.top() as f32;
+        let origin = bounds.center();
+        let rotation = face.rot_theta();
 
-        // TODO: make image MASSIVE, then draw
-        let scale = 10;
-        let old_width = img.width();
-        let old_height = img.height();
-        *img = resize(
-            img,
-            scale * old_width,
-            scale * old_height,
-            FilterType::Nearest,
-        );
-
-        let scale_x = img.width() as f32 / old_width as f32;
-        let scale_y = img.height() as f32 / old_height as f32;
-
-        // TODO: find indices that correspond to mouth, nose, eye boundaries
-
-        for i in 0..mesh.len() / 3 {
-            // 1. rescale
-            let idx = i * 3;
-            let x = (bounds.left() as f32 + r[idx] * x_scale) * scale_x;
-            let y = (bounds.top() as f32 + r[idx + 1] * y_scale) * scale_y;
-            let mut p = Point::new(x.round() as u32, y.round() as u32);
-
-            let origin = bounds.center();
-
-            // 2. unrotate
-            p.rotate(origin, face.rot_theta());
-
-            drawing::draw_filled_circle_mut(
-                img,
-                (p.x as i32, p.y as i32),
-                3,
-                Rgb([255u8, 255u8, 255u8]),
-            );
-
-            drawing::draw_text_mut(
-                img,
-                Rgb([0u8, 0u8, 0u8]),
-                p.x as i32,
-                p.y as i32,
-                24.,
-                &self.font,
-                &format!("{idx}"),
-            );
-        }
-
-        Ok(())
+        Ok(Face {
+            mouth: extract_feature(
+                &r,
+                &MOUTH_IDXS,
+                x_offset,
+                y_offset,
+                x_scale,
+                y_scale,
+                &origin,
+                rotation,
+            ),
+            l_eye: extract_feature(
+                &r,
+                &L_EYE_IDXS,
+                x_offset,
+                y_offset,
+                x_scale,
+                y_scale,
+                &origin,
+                rotation,
+            ),
+            r_eye: extract_feature(
+                &r,
+                &R_EYE_IDXS,
+                x_offset,
+                y_offset,
+                x_scale,
+                y_scale,
+                &origin,
+                rotation,
+            ),
+            nose: extract_feature(
+                &r, &NOSE_IDXS, x_offset, y_offset, x_scale, y_scale, &origin, rotation,
+            ),
+        })
     }
+}
+
+fn extract_feature(
+    mesh: &[f32],
+    kpt_idxs: &[usize],
+    x_offset: f32,
+    y_offset: f32,
+    x_scale: f32,
+    y_scale: f32,
+    origin: &Point,
+    rotation: f32,
+) -> NPoint {
+    let mut points = Vec::new();
+
+    for i in kpt_idxs {
+        let idx = i * 3;
+        let x = x_offset + mesh[idx] * x_scale;
+        let y = y_offset + mesh[idx + 1] * y_scale;
+
+        let mut p = Point::new(x.round() as u32, y.round() as u32);
+
+        p.rotate(*origin, rotation);
+
+        points.push(p)
+    }
+
+    NPoint { points }
 }

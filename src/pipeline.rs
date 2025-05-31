@@ -1,16 +1,15 @@
 use anyhow::Result;
 use image::{Rgb, RgbImage};
 
+use crate::shapes::npoint::NPoint;
 use detection::FaceDetector;
 use imageproc::drawing;
 use landmarks::FaceLandmarker;
 use log::debug;
-use rect::Point;
 
 mod detection;
 mod landmarks;
 mod model;
-mod rect;
 
 pub struct Pipeline {
     face_detector: FaceDetector,
@@ -18,20 +17,16 @@ pub struct Pipeline {
 }
 
 #[derive(Debug, Clone)]
-pub struct Feature {
-    pub points: Vec<Point>,
-}
-
-#[derive(Debug, Clone)]
-pub struct FaceFeatures {
-    pub left_eye: Option<Feature>,
-    pub right_eye: Option<Feature>,
-    pub mouth: Option<Feature>,
+pub struct Face {
+    pub l_eye: NPoint,
+    pub r_eye: NPoint,
+    pub mouth: NPoint,
+    pub nose: NPoint,
 }
 
 #[derive(Debug, Clone)]
 pub struct Detection {
-    pub faces: Vec<FaceFeatures>,
+    pub faces: Vec<Face>,
 }
 
 impl Pipeline {
@@ -42,32 +37,45 @@ impl Pipeline {
         })
     }
 
-    pub fn run(&self, img: &RgbImage) -> Result<()> {
-        println!("TODO: implement me!");
-        let res = self.face_detector.run(img)?;
-        Ok(())
+    pub fn run(&self, img: &RgbImage) -> Result<Detection> {
+        let face_bounds = self.face_detector.run(img)?;
+        let mut faces = Vec::new();
+
+        for face_bound in face_bounds {
+            debug!("Face bound: {face_bound:?}");
+            let face = self.face_landmarker.run(img, &face_bound)?;
+            debug!("Face features: {face:?}");
+
+            faces.push(face);
+        }
+
+        Ok(Detection { faces })
     }
 
-    pub fn run_trace(&self, img: &mut RgbImage) -> Result<()> {
-        let res = self.face_detector.run(img)?;
-        for face in res {
-            let res = self.face_landmarker.run(img, &face);
-            debug!("{face:?}");
-            drawing::draw_hollow_rect_mut(img, face.bounds.into(), Rgb([255u8, 0u8, 0u8]));
+    pub fn run_trace(&self, img: &mut RgbImage) -> Result<Detection> {
+        let face_bounds = self.face_detector.run(img)?;
+        let mut faces = Vec::new();
+
+        for face_bound in face_bounds {
+            debug!("Face bound: {face_bound:?}");
+            let face = self.face_landmarker.run(img, &face_bound)?;
+            debug!("Face features: {face:?}");
+            faces.push(face);
+            drawing::draw_hollow_rect_mut(img, face_bound.bounds.into(), Rgb([255u8, 0u8, 0u8]));
             drawing::draw_filled_circle_mut(
                 img,
-                (face.l_eye.x as i32, face.l_eye.y as i32),
+                (face_bound.l_eye.x as i32, face_bound.l_eye.y as i32),
                 3,
                 Rgb([0u8, 255u8, 0u8]),
             );
             drawing::draw_filled_circle_mut(
                 img,
-                (face.r_eye.x as i32, face.r_eye.y as i32),
+                (face_bound.r_eye.x as i32, face_bound.r_eye.y as i32),
                 3,
                 Rgb([255u8, 0u8, 0u8]),
             );
         }
 
-        Ok(())
+        Ok(Detection { faces })
     }
 }

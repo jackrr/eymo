@@ -1,5 +1,6 @@
 use super::model::{initialize_model, Session};
-use super::rect::{PointF32, Rect, RectF32};
+use crate::shapes::point::PointF32;
+use crate::shapes::rect::{Rect, RectF32};
 use anchors::gen_anchors;
 use anyhow::Result;
 use image::imageops::{resize, FilterType};

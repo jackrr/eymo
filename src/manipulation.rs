@@ -1,75 +1,73 @@
+use anyhow::Result;
+pub use copy::Copy;
 use image::RgbImage;
+pub use swap::Swap;
+
+mod copy;
+mod swap;
 
 // TODO: bake out the implementations for each operation i care about
 // TODO: verify each on an input image -- verify nesting behavior as well
 // TODO: define the confiuration language + build corresponding parser
 
-// #[derive(Debug, Clone)]
-// pub enum Operation {
-//     Move,
-//     Rotate,
-//     Swap,
-//     Flip,
-//     Scale,
-//     Repeat,
-// }
-
 #[derive(Debug, Clone)]
-pub struct Target {
-    // shape? rect?
-    // examples: mouth, eye, bounding box, arbitrary list of coordinates to form a shape
+pub enum Operation {
+    Swap(Swap),
+    Copy(Copy),
+    // Move,
+    // Rotate,
+    // Flip,
+    // Scale,
+    // Repeat,
 }
 
 #[derive(Debug, Clone)]
-struct MoveArgs {
-    dx: i32,
-    src: Target,
-    dest: Target,
+pub struct OperationTree {
+    op: Operation,
+    sub_ops: Vec<OperationTree>,
 }
 
-#[derive(Debug, Clone)]
-struct RotateArgs {
-    theta: f32,
-}
-
-#[derive(Debug, Clone)]
-enum Operation {
-    Move(MoveArgs),
-    Rotate(RotateArgs),
-}
-
-impl Operation {
-    fn type_name(&self) -> &'static str {
-        match self {
-            Operation::Move(_) => "move",
-            Operation::Rotate(_) => "rotate",
-        }
-    }
-
-    fn run(&self, img: &mut RgbImage) {
-        match self {
-            Operation::Move(m) => {
-                // TODO: do the move
-            }
-            Operation::Rotate(r) => {
-                // TODO: do the rotation
-            }
-        }
-    }
-    fn roi(&self) {
-        match self {
-            Operation::Move(m) => {
-                // TODO: return target
-            }
-            Operation::Rotate(r) => {
-                // TODO: return src
-            }
+impl From<Operation> for OperationTree {
+    fn from(op: Operation) -> OperationTree {
+        OperationTree {
+            op,
+            sub_ops: Vec::new(),
         }
     }
 }
 
-#[derive(Debug, Clone)]
-struct Instruction {
-    operation: Operation,
-    nested_operations: Vec<Instruction>,
+impl From<Swap> for Operation {
+    fn from(s: Swap) -> Operation {
+        Operation::Swap(s)
+    }
+}
+
+impl From<Copy> for Operation {
+    fn from(c: Copy) -> Operation {
+        Operation::Copy(c)
+    }
+}
+
+pub trait Executable {
+    fn execute(&self, img: &mut RgbImage) -> Result<()>;
+}
+
+impl Executable for OperationTree {
+    fn execute(&self, img: &mut RgbImage) -> Result<()> {
+        match &self.op {
+            Operation::Swap(s) => {
+                s.execute(img)?;
+            }
+            Operation::Copy(c) => {
+                c.execute(img)?;
+            }
+        }
+
+        for op in &self.sub_ops {
+            // TODO: scope to roi of self.operation
+            op.execute(img)?;
+        }
+
+        Ok(())
+    }
 }

@@ -15,5 +15,5 @@ log = "0.4.27"
 ndarray = { version = "0.16.1", features = ["rayon"] }
 nokhwa = { version = "0.10.7", features = ["input-native", "input-jscam", "output-threaded"] }
 num_cpus = "1.16.0"
-ort = { version = "=2.0.0-rc.9", features = ["ndarray"] }
+ort = { version = "=2.0.0-rc.9", features = ["ndarray", "xnnpack"] }
 show-image = { version = "0.14.1", features = ["image"] }

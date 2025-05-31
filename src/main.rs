@@ -5,10 +5,8 @@ use clap::Parser;
 use image::{ImageReader, RgbImage};
 use log::{debug, info, warn};
 use num_cpus::get as get_cpu_count;
-use pipeline::Detection;
-use std::sync::{Arc, Mutex, RwLock};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::Instant;
 
 use crate::manipulation::{Copy, Executable, Operation, OperationTree, Swap};
 use crate::pipeline::Pipeline;
@@ -59,81 +57,33 @@ fn main() -> Result<()> {
     // Default mode: Webcam stream
 
     // TODO: allow arg to specify a video camera
-
-    let face_detection = Arc::new(RwLock::new(DetectionResult {
-        detection: None,
-        calced_at: Instant::now(),
-    }));
-
-    let latest_img: Arc<Mutex<DetectionInput>> = Arc::new(Mutex::new(None));
-
-    let model_output = face_detection.clone();
-    let model_input = latest_img.clone();
-    // TODO: try doing model inference as part of image processing fn
-    // and profile performance
-    let model_res = thread::spawn(move || -> Result<()> {
-        loop {
-            let mut model_input = model_input.lock().unwrap();
-
-            if let Some(image) = model_input.take() {
-                drop(model_input);
-                debug!("Re-running face detection model...");
-                let detection = pipeline.run(&image)?;
-
-                // write updated faces into shared state
-                let mut model_output = model_output.write().unwrap();
-                model_output.detection = detection.into();
-                debug!(
-                    "{:?} elapsed since last face detection run",
-                    model_output.calced_at.elapsed()
-                );
-                model_output.calced_at = Instant::now();
-                drop(model_output)
-            } else {
-                drop(model_input);
-            }
-            thread::sleep(Duration::from_millis(1));
-        }
-    });
-
-    process_frames(
-        total_threads / 2,
-        face_detection.clone(),
-        latest_img.clone(),
-    )?;
-
-    model_res.join();
+    process_frames(total_threads / 2 - 1, pipeline)?;
 
     Ok(())
 }
 
-struct DetectionResult {
-    detection: Option<Detection>,
-    calced_at: Instant,
+fn check_time(within_ms: u32, start: Instant, waypoint: &str) -> Result<()> {
+    let elapsed_ms = start.elapsed().as_millis();
+    // if elapsed_ms >= within_ms.into() {
+    //     return Err(Error::msg(format!(
+    //         "{elapsed_ms}ms exceeds allowed time of {within_ms}ms at {waypoint}",
+    //     )));
+    // }
+
+    debug!("{elapsed_ms}ms at {waypoint}");
+
+    Ok(())
 }
 
-type DetectionInput = Option<RgbImage>;
-
-fn process_frame(
-    within_ms: u32,
-    img: &mut RgbImage,
-    face_detection: &Arc<RwLock<DetectionResult>>,
-) -> Result<()> {
+fn process_frame(within_ms: u32, img: &mut RgbImage, pipeline: Arc<Pipeline>) -> Result<()> {
     let start = Instant::now();
-    let face_detection = face_detection.read().unwrap();
+    let face_detection = pipeline.run(&img)?;
+    debug!("Face detection took {:?}", start.elapsed());
+    check_time(within_ms, start, "Face Detection")?;
 
-    let faces = match &face_detection.detection {
-        Some(d) => d.faces.clone(),
-        None => {
-            debug!("No faces detected.");
-            return Ok(());
-        }
-    };
-
-    drop(face_detection); // free lock early
     let mut ops: Vec<OperationTree> = Vec::new();
 
-    for face in faces {
+    for face in face_detection.faces {
         let mouth = face.mouth;
         let l_eye = face.l_eye;
         let r_eye = face.r_eye;
@@ -157,12 +107,7 @@ fn process_frame(
         //     }
 
         op.execute(img)?;
-        if start.elapsed().as_millis() >= within_ms.into() {
-            return Err(Error::msg(format!(
-                "process_image exceeded allowed time of {}ms",
-                within_ms
-            )));
-        }
+        check_time(within_ms, start, "Image Manipulation")?;
     }
 
     Ok(())

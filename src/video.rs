@@ -1,12 +1,13 @@
+use crate::pipeline::Pipeline;
 use anyhow::Result;
 use image::RgbImage;
 use log::{debug, error, warn};
 use show_image::create_window;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Instant;
 
-use crate::{process_frame, DetectionInput, DetectionResult};
+use crate::process_frame;
 
 use nokhwa::{
     nokhwa_initialize,
@@ -17,12 +18,9 @@ use nokhwa::{
 };
 
 const MIN_FPS: u32 = 30;
+const MAX_LAG_MS: u128 = 100;
 
-pub fn process_frames(
-    max_threads: usize,
-    face_detection: Arc<RwLock<DetectionResult>>,
-    latest_img: Arc<Mutex<DetectionInput>>,
-) -> Result<()> {
+pub fn process_frames(max_threads: usize, pipeline: Pipeline) -> Result<()> {
     let (sender, receiver) = flume::bounded(max_threads);
     let (sender, receiver) = (Arc::new(sender), Arc::new(receiver));
     let window = create_window("image", Default::default())?;
@@ -40,6 +38,9 @@ pub fn process_frames(
 
     let s = Arc::clone(&sender);
     let input_frame_idx = Arc::clone(&input_frame_idx);
+
+    let pipeline = Arc::new(pipeline);
+
     let mut camera = CallbackCamera::new(
         cameras.last().unwrap().index().clone(),
         RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate),
@@ -53,29 +54,25 @@ pub fn process_frames(
 
             debug!("Processing frame {frame_idx}");
 
-            let face_detection = Arc::clone(&face_detection);
-            let latest_img = Arc::clone(&latest_img);
+            let pipeline = Arc::clone(&pipeline);
 
             let join = thread::spawn(move || -> (u32, RgbImage) {
                 let mut image = buffer.decode_image::<RgbFormat>().unwrap();
-                let mut latest_img = latest_img.lock().unwrap();
-                let _ = latest_img.insert(image.clone());
-                drop(latest_img);
 
                 match process_frame(
                     (ms_per_frame_per_thread as u128 - rec_at.elapsed().as_millis()) as u32,
                     &mut image,
-                    &face_detection,
+                    pipeline,
                 ) {
                     Ok(_) => {}
                     Err(err) => warn!("Could not complete processing frame {}: {}", frame_idx, err),
                 }
 
-                debug!(
-                    "Finished processing frame {} in {:?}ms",
-                    frame_idx,
-                    rec_at.elapsed().as_millis()
-                );
+                let total_ms = rec_at.elapsed().as_millis();
+                debug!("Finished processing frame {frame_idx} in {total_ms}ms");
+                if total_ms > MAX_LAG_MS {
+                    warn!("Took {total_ms}ms to process frame...");
+                }
 
                 (frame_idx, image)
             });
@@ -104,7 +101,7 @@ pub fn process_frames(
 
                 window.set_image("image", image)?;
                 debug!(
-                    "Rendered frame {} after {:?}",
+                    "Rendered frame {} after {:?} since previous frame",
                     frame_idx,
                     last_frame_at.elapsed()
                 );

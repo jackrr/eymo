@@ -7,10 +7,15 @@ pub use ort::session::Session;
 
 pub fn initialize_model(model_file_path: &str, threads: usize) -> Result<Session> {
     ort::init()
-        .with_execution_providers([execution_providers::XNNPACKExecutionProvider::default()
-            .with_intra_op_num_threads(NonZero::new(threads - 2).unwrap())
-            .build()
-            .error_on_failure()])
+        .with_execution_providers([
+            execution_providers::OpenVINOExecutionProvider::default()
+                .build()
+                .error_on_failure(),
+            // execution_providers::XNNPACKExecutionProvider::default()
+            //     .with_intra_op_num_threads(NonZero::new(threads - 2).unwrap())
+            //     .build()
+            //     .error_on_failure(),
+        ])
         .commit()?;
 
     let model = Session::builder()?

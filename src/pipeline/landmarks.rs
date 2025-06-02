@@ -1,19 +1,21 @@
 use super::detection;
-use super::model::{initialize_model, Session};
 use super::Face;
 use crate::shapes::npoint::NPoint;
 use crate::shapes::point::Point;
 use ab_glyph::FontRef;
 use anyhow::Result;
+
 use image::imageops::{resize, FilterType};
 use image::{GenericImage, GenericImageView, Rgb, RgbImage};
 use imageproc::geometric_transformations::{rotate_about_center, Interpolation};
 use log::debug;
 use ndarray::Array;
-use ort::value::Tensor;
+
+// use burn::tensor;
+use crate::models::face_landmark::Model;
 
 pub struct FaceLandmarker {
-    model: Session,
+    model: Model,
     font: FontRef<'static>,
 }
 
@@ -38,7 +40,7 @@ const NOSE_IDXS: [usize; 18] = [
 impl FaceLandmarker {
     pub fn new(threads: usize) -> Result<FaceLandmarker> {
         Ok(FaceLandmarker {
-            model: initialize_model("mediapipe_face_landmark.onnx", threads)?,
+            model: Model::default(),
             font: FontRef::try_from_slice(include_bytes!(
                 "/usr/share/fonts/fira-code/FiraCode-Bold.ttf"
             ))
@@ -82,10 +84,11 @@ impl FaceLandmarker {
                 }
             });
 
-        let input = Tensor::from_array(input_arr)?;
-        let outputs = self.model.run(ort::inputs!["input_1" => input]?)?;
+        let output = self.model.forward(input_arr);
+        // let input = Tensor::from_array(input_arr)?;
+        // let outputs = self.model.run(ort::inputs!["input_1" => input]?)?;
 
-        let output = outputs["conv2d_21"].try_extract_tensor::<f32>()?;
+        let output = output["conv2d_21"].try_extract_tensor::<f32>()?;
         let mesh = output.squeeze().squeeze().squeeze();
 
         let r = mesh.as_slice().unwrap();

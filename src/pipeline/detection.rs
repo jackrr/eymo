@@ -1,4 +1,3 @@
-use super::model::{initialize_model, Session};
 use crate::shapes::point::PointF32;
 use crate::shapes::rect::{Rect, RectF32};
 use anchors::gen_anchors;
@@ -7,7 +6,8 @@ use image::imageops::{resize, FilterType};
 use image::RgbImage;
 use log::debug;
 use ndarray::Array;
-use ort::value::Tensor;
+
+use crate::models::face_detection::Model;
 
 mod anchors;
 
@@ -15,7 +15,7 @@ const WIDTH: u32 = 128;
 const HEIGHT: u32 = 128;
 
 pub struct FaceDetector {
-    model: Session,
+    model: Model,
     anchors: [RectF32; 896],
 }
 
@@ -66,7 +66,7 @@ impl FaceDetector {
     */
     pub fn new(threads: usize) -> Result<FaceDetector> {
         Ok(FaceDetector {
-            model: initialize_model("mediapipe_face_detection_short_range.onnx", threads)?,
+            model: Model::default(),
             anchors: gen_anchors(),
         })
     }
@@ -91,8 +91,8 @@ impl FaceDetector {
                 }
             });
 
-        let input = Tensor::from_array(input_arr)?;
-        let outputs = self.model.run(ort::inputs!["input" => input]?)?;
+        // let outputs = self.model.run(ort::inputs!["input" => input]?)?;
+        let outputs = self.model.forward(input_arr);
         let regressors = outputs["regressors"].try_extract_tensor::<f32>()?;
         let classificators = outputs["classificators"].try_extract_tensor::<f32>()?;
         let scores = classificators.as_slice().unwrap();

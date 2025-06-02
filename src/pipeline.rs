@@ -9,7 +9,6 @@ use log::debug;
 
 mod detection;
 mod landmarks;
-mod model;
 
 pub struct Pipeline {
     face_detector: FaceDetector,

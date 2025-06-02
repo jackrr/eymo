@@ -12,6 +12,7 @@ use crate::manipulation::{Copy, Executable, Operation, OperationTree, Swap};
 use crate::pipeline::Pipeline;
 use crate::video::process_frames;
 mod manipulation;
+mod models;
 mod pipeline;
 mod shapes;
 mod video;

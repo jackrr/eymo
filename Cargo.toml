@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+ab_glyph = "0.2.29"
 anyhow = "1.0.98"
 clap = { version = "4.5.38", features = ["derive"] }
 env_logger = "0.11.8"
@@ -14,5 +15,4 @@ log = "0.4.27"
 ndarray = { version = "0.16.1", features = ["rayon"] }
 nokhwa = { version = "0.10.7", features = ["input-native", "input-jscam", "output-threaded"] }
 num_cpus = "1.16.0"
-ort = { version = "=2.0.0-rc.9", features = ["ndarray"] }
-show-image = { version = "0.14.1", features = ["image"] }
+ort = { version = "=2.0.0-rc.9", features = ["ndarray", "xnnpack"] }

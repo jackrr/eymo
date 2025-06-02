@@ -1,13 +1,15 @@
-use anyhow::{Error, Result};
-use image::DynamicImage;
-use log::{debug, warn};
-use show_image::create_window;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, RwLock};
+use crate::pipeline::Pipeline;
+use anyhow::Result;
+use image::{EncodableLayout, RgbImage};
+use log::{debug, error, warn};
+use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use crate::{process_frame, DetectionInput, FaceDetection};
+use std::io::Write;
+use std::process::{Command, Stdio};
+
+use crate::process_frame;
 
 use nokhwa::{
     nokhwa_initialize,
@@ -17,114 +19,16 @@ use nokhwa::{
     CallbackCamera,
 };
 
-struct Frame {
-    image: DynamicImage,
-    index: u32,
-    rec_at: Instant,
-}
-
 const MIN_FPS: u32 = 30;
+const MAX_LAG_MS: u128 = 100;
 
-pub fn process_frames(
-    max_threads: usize,
-    face_detection: &Arc<RwLock<FaceDetection>>,
-    latest_img: &Arc<Mutex<DetectionInput>>,
-) -> Result<()> {
-    let (sender, receiver) = flume::unbounded();
-
+pub fn process_frames(max_threads: usize, pipeline: Pipeline) -> Result<()> {
+    let (sender, receiver) = flume::bounded(max_threads);
     let (sender, receiver) = (Arc::new(sender), Arc::new(receiver));
-
-    let queued_frames: Arc<Mutex<HashMap<u32, DynamicImage>>> =
-        Arc::new(Mutex::new(HashMap::new()));
+    let ms_per_frame_per_thread = 1000 / MIN_FPS * u32::try_from(max_threads).unwrap();
     let input_frame_idx = Arc::new(Mutex::new(0));
 
-    let window = create_window("image", Default::default())?;
-
-    // Need to keep camera in a var to prevent collection and maintain stream
-    let camera = initialize_source_stream(&sender, input_frame_idx)?;
-
-    let thread_count = max_threads - 1; // -1 for main
-    debug!(
-        "Initializing {:?} image processing threads...",
-        thread_count
-    );
-
-    let ms_per_frame_per_thread = 1000 / MIN_FPS * u32::try_from(thread_count).unwrap();
-    for i in 0..thread_count {
-        let queued_frames = queued_frames.clone();
-        let receiver = Arc::clone(&receiver);
-        let face_detection = Arc::clone(face_detection);
-        let latest_img = Arc::clone(latest_img);
-
-        thread::spawn(move || -> Result<()> {
-            while !receiver.is_disconnected() {
-                let frame = receiver.recv()?;
-                let mut image = frame.image;
-                let mut latest_img = latest_img.lock().unwrap();
-                let _ = latest_img.insert(image.clone());
-                drop(latest_img);
-
-                match process_frame(ms_per_frame_per_thread, &mut image, &face_detection) {
-                    Ok(_) => {}
-                    Err(err) => warn!(
-                        "Thread {} could not complete processing frame {}: {}",
-                        i, frame.index, err
-                    ),
-                }
-
-                let mut frame_queue = queued_frames.lock().unwrap();
-                frame_queue.insert(frame.index, image);
-                debug!(
-                    "Thread {:?} finished frame {:?} in {:?}ms",
-                    i,
-                    frame.index,
-                    frame.rec_at.elapsed().as_millis()
-                );
-            }
-            Ok(())
-        });
-    }
-
-    let mut output_frame_idx = 0;
-    let mut last_frame_at = Instant::now();
-    let max_frame_delay = Duration::from_secs(10);
-
-    loop {
-        // TODO: frame rate logging
-        let mut frame_queue = queued_frames.lock().unwrap();
-        if frame_queue.contains_key(&output_frame_idx) {
-            let image = frame_queue.remove(&output_frame_idx).unwrap();
-            window.set_image("image", image)?;
-            debug!(
-                "Rendered frame {} after {:?}",
-                output_frame_idx,
-                last_frame_at.elapsed()
-            );
-            last_frame_at = Instant::now();
-            output_frame_idx += 1;
-        } else {
-            if last_frame_at.elapsed() > max_frame_delay {
-                return Err(Error::msg(format!(
-                    "No frame ready after {:?}!",
-                    max_frame_delay
-                )));
-            }
-            // debug!("Frame {:?} not ready, waiting 1ms...", output_frame_idx);
-            drop(frame_queue); // free lock
-            thread::sleep(Duration::from_millis(10));
-        }
-    }
-
-    // TODO: join the threads
-
-    Ok(())
-}
-
-fn initialize_source_stream(
-    sender: &Arc<flume::Sender<Frame>>,
-    frame_count: Arc<Mutex<u32>>,
-) -> Result<CallbackCamera> {
-    // only needs to be run on OSX
+    // Input stream
     nokhwa_initialize(|granted| {
         debug!("User said {}", granted);
     });
@@ -134,29 +38,135 @@ fn initialize_source_stream(
         .iter()
         .for_each(|cam| debug!("Found camera: {:?}", cam));
 
-    let s = Arc::clone(sender);
+    let s = Arc::clone(&sender);
+    let input_frame_idx = Arc::clone(&input_frame_idx);
+
+    let pipeline = Arc::new(pipeline);
+
     let mut camera = CallbackCamera::new(
         cameras.last().unwrap().index().clone(),
         RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate),
         move |buffer| {
-            let mut frame_idx = frame_count.lock().unwrap();
-            let index = frame_idx.clone();
+            let rec_at = Instant::now();
 
-            *frame_idx += 1;
-            drop(frame_idx);
+            let mut frame_idx_mtx = input_frame_idx.lock().unwrap();
+            let frame_idx = frame_idx_mtx.clone();
+            *frame_idx_mtx += 1;
+            drop(frame_idx_mtx);
 
-            s.send(Frame {
-                image: DynamicImage::from(buffer.decode_image::<RgbFormat>().unwrap()),
-                index,
-                rec_at: Instant::now(),
-            })
-            .expect("Error sending frame to buffer stream");
-            debug!("Sent decoded frame {index} to channel...");
+            debug!("Processing frame {frame_idx}");
+
+            let pipeline = Arc::clone(&pipeline);
+
+            let join = thread::spawn(move || -> (u32, RgbImage) {
+                let mut image = buffer.decode_image::<RgbFormat>().unwrap();
+
+                match process_frame(
+                    (ms_per_frame_per_thread as u128 - rec_at.elapsed().as_millis()) as u32,
+                    &mut image,
+                    pipeline,
+                ) {
+                    Ok(_) => {}
+                    Err(err) => warn!("Could not complete processing frame {}: {}", frame_idx, err),
+                }
+
+                let total_ms = rec_at.elapsed().as_millis();
+                debug!("Finished processing frame {frame_idx} in {total_ms}ms");
+                if total_ms > MAX_LAG_MS {
+                    warn!("Took {total_ms}ms to process frame...");
+                }
+
+                (frame_idx, image)
+            });
+            s.send(join).expect("Error sending thread to buffer stream");
         },
     )?;
-    camera.set_frame_rate(30)?;
 
+    camera.set_frame_rate(30)?;
     camera.open_stream().unwrap();
 
-    Ok(camera)
+    let resolution = camera.resolution()?;
+
+    // Output stream
+    // TODO: configurable destination from clap args
+    let mut output_stream = OutputVideoStream::new(resolution.width(), resolution.height())?;
+
+    let mut output_frame_idx = 0;
+    let mut last_frame_at = Instant::now();
+
+    while !receiver.is_disconnected() {
+        let frame_thread = receiver.recv()?;
+        // TODO: frame rate logging
+        match frame_thread.join() {
+            Ok((frame_idx, image)) => {
+                if output_frame_idx > frame_idx {
+                    debug!(
+                        "Skipping frame {} received while at index {}.",
+                        frame_idx, output_frame_idx,
+                    );
+                    continue;
+                }
+
+                output_stream.write_frame(&image)?;
+                debug!(
+                    "Rendered frame {} after {:?} since previous frame",
+                    frame_idx,
+                    last_frame_at.elapsed()
+                );
+                last_frame_at = Instant::now();
+                output_frame_idx += 1;
+            }
+            Err(e) => error!("Frame thread failed: {:?}", e),
+        }
+    }
+
+    output_stream.close()?;
+
+    Ok(())
+}
+
+struct OutputVideoStream {
+    ffplay: std::process::Child,
+}
+
+impl OutputVideoStream {
+    // TODO: make configurable to enable v4loopback, whatever is used on mac
+    fn new(width: u32, height: u32) -> Result<Self> {
+        let ffplay = Command::new("ffplay")
+            .args(&[
+                "-f",
+                "rawvideo",
+                "-pixel_format",
+                "rgb24",
+                "-video_size",
+                &format!("{}x{}", width, height),
+                "-framerate",
+                "30",
+                "-fflags",
+                "nobuffer",
+                "-flags",
+                "low_delay",
+                "-",
+            ])
+            .stdin(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()?;
+
+        Ok(Self { ffplay })
+    }
+
+    fn write_frame(&mut self, img: &RgbImage) -> Result<()> {
+        if let Some(stdin) = self.ffplay.stdin.as_mut() {
+            stdin.write_all(img.as_bytes())?;
+            stdin.flush()?;
+        }
+
+        Ok(())
+    }
+
+    fn close(mut self) -> Result<()> {
+        drop(self.ffplay.stdin.take());
+        self.ffplay.wait()?;
+        Ok(())
+    }
 }

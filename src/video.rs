@@ -1,11 +1,13 @@
 use crate::pipeline::Pipeline;
 use anyhow::Result;
-use image::RgbImage;
+use image::{EncodableLayout, RgbImage};
 use log::{debug, error, warn};
-use show_image::create_window;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Instant;
+
+use std::io::Write;
+use std::process::{Command, Stdio};
 
 use crate::process_frame;
 
@@ -23,10 +25,10 @@ const MAX_LAG_MS: u128 = 100;
 pub fn process_frames(max_threads: usize, pipeline: Pipeline) -> Result<()> {
     let (sender, receiver) = flume::bounded(max_threads);
     let (sender, receiver) = (Arc::new(sender), Arc::new(receiver));
-    let window = create_window("image", Default::default())?;
     let ms_per_frame_per_thread = 1000 / MIN_FPS * u32::try_from(max_threads).unwrap();
     let input_frame_idx = Arc::new(Mutex::new(0));
 
+    // Input stream
     nokhwa_initialize(|granted| {
         debug!("User said {}", granted);
     });
@@ -83,6 +85,12 @@ pub fn process_frames(max_threads: usize, pipeline: Pipeline) -> Result<()> {
     camera.set_frame_rate(30)?;
     camera.open_stream().unwrap();
 
+    let resolution = camera.resolution()?;
+
+    // Output stream
+    // TODO: configurable destination from clap args
+    let mut output_stream = OutputVideoStream::new(resolution.width(), resolution.height())?;
+
     let mut output_frame_idx = 0;
     let mut last_frame_at = Instant::now();
 
@@ -99,7 +107,7 @@ pub fn process_frames(max_threads: usize, pipeline: Pipeline) -> Result<()> {
                     continue;
                 }
 
-                window.set_image("image", image)?;
+                output_stream.write_frame(&image)?;
                 debug!(
                     "Rendered frame {} after {:?} since previous frame",
                     frame_idx,
@@ -112,5 +120,53 @@ pub fn process_frames(max_threads: usize, pipeline: Pipeline) -> Result<()> {
         }
     }
 
+    output_stream.close()?;
+
     Ok(())
+}
+
+struct OutputVideoStream {
+    ffplay: std::process::Child,
+}
+
+impl OutputVideoStream {
+    // TODO: make configurable to enable v4loopback, whatever is used on mac
+    fn new(width: u32, height: u32) -> Result<Self> {
+        let ffplay = Command::new("ffplay")
+            .args(&[
+                "-f",
+                "rawvideo",
+                "-pixel_format",
+                "rgb24",
+                "-video_size",
+                &format!("{}x{}", width, height),
+                "-framerate",
+                "30",
+                "-fflags",
+                "nobuffer",
+                "-flags",
+                "low_delay",
+                "-",
+            ])
+            .stdin(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()?;
+
+        Ok(Self { ffplay })
+    }
+
+    fn write_frame(&mut self, img: &RgbImage) -> Result<()> {
+        if let Some(stdin) = self.ffplay.stdin.as_mut() {
+            stdin.write_all(img.as_bytes())?;
+            stdin.flush()?;
+        }
+
+        Ok(())
+    }
+
+    fn close(mut self) -> Result<()> {
+        drop(self.ffplay.stdin.take());
+        self.ffplay.wait()?;
+        Ok(())
+    }
 }

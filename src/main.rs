@@ -29,7 +29,6 @@ struct Args {
     max_threads: Option<usize>,
 }
 
-#[show_image::main]
 fn main() -> Result<()> {
     env_logger::init();
     let args = Args::parse();

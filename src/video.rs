@@ -1,10 +1,10 @@
-use crate::pipeline::Pipeline;
+use crate::pipeline::Detection;
 use anyhow::Result;
 use image::{EncodableLayout, RgbImage};
 use log::{debug, error, warn};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -19,13 +19,16 @@ use nokhwa::{
     CallbackCamera,
 };
 
-const MIN_FPS: u32 = 30;
-const MAX_LAG_MS: u128 = 100;
+const TARGET_FPS: u32 = 30;
+const MAX_LAG_MS: u128 = 50;
 
-pub fn process_frames(max_threads: usize, pipeline: Pipeline) -> Result<()> {
+pub fn process_frames(
+    max_threads: usize,
+    detection: Arc<RwLock<Option<Detection>>>,
+    latest_frame: Arc<Mutex<Option<RgbImage>>>,
+) -> Result<()> {
     let (sender, receiver) = flume::bounded(max_threads);
     let (sender, receiver) = (Arc::new(sender), Arc::new(receiver));
-    let ms_per_frame_per_thread = 1000 / MIN_FPS * u32::try_from(max_threads).unwrap();
     let input_frame_idx = Arc::new(Mutex::new(0));
 
     // Input stream
@@ -41,8 +44,6 @@ pub fn process_frames(max_threads: usize, pipeline: Pipeline) -> Result<()> {
     let s = Arc::clone(&sender);
     let input_frame_idx = Arc::clone(&input_frame_idx);
 
-    let pipeline = Arc::new(pipeline);
-
     let mut camera = CallbackCamera::new(
         cameras.last().unwrap().index().clone(),
         RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate),
@@ -56,15 +57,20 @@ pub fn process_frames(max_threads: usize, pipeline: Pipeline) -> Result<()> {
 
             debug!("Processing frame {frame_idx}");
 
-            let pipeline = Arc::clone(&pipeline);
+            let latest_frame = Arc::clone(&latest_frame);
+            let detection = Arc::clone(&detection);
 
             let join = thread::spawn(move || -> (u32, RgbImage) {
                 let mut image = buffer.decode_image::<RgbFormat>().unwrap();
+                // Store newest image for ML model to read from
+                let mut latest_frame = latest_frame.lock().unwrap();
+                *latest_frame = Some(image.clone());
+                drop(latest_frame);
 
                 match process_frame(
-                    (ms_per_frame_per_thread as u128 - rec_at.elapsed().as_millis()) as u32,
+                    (MAX_LAG_MS - rec_at.elapsed().as_millis()) as u32,
                     &mut image,
-                    pipeline,
+                    detection,
                 ) {
                     Ok(_) => {}
                     Err(err) => warn!("Could not complete processing frame {}: {}", frame_idx, err),
@@ -115,6 +121,8 @@ pub fn process_frames(max_threads: usize, pipeline: Pipeline) -> Result<()> {
                 );
                 last_frame_at = Instant::now();
                 output_frame_idx += 1;
+
+                thread::sleep(Duration::from_millis((1000 / TARGET_FPS).into()));
             }
             Err(e) => error!("Frame thread failed: {:?}", e),
         }

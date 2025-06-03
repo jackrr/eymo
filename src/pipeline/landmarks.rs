@@ -3,7 +3,6 @@ use super::model::{initialize_model, Session};
 use super::Face;
 use crate::shapes::npoint::NPoint;
 use crate::shapes::point::Point;
-use ab_glyph::FontRef;
 use anyhow::Result;
 use image::imageops::{resize, FilterType};
 use image::{GenericImage, GenericImageView, Rgb, RgbImage};
@@ -14,7 +13,6 @@ use ort::value::Tensor;
 
 pub struct FaceLandmarker {
     model: Session,
-    font: FontRef<'static>,
 }
 
 const HEIGHT: u32 = 192;
@@ -39,18 +37,13 @@ impl FaceLandmarker {
     pub fn new(threads: usize) -> Result<FaceLandmarker> {
         Ok(FaceLandmarker {
             model: initialize_model("mediapipe_face_landmark.onnx", threads)?,
-            font: FontRef::try_from_slice(include_bytes!(
-                "/usr/share/fonts/fira-code/FiraCode-Bold.ttf"
-            ))
-            .unwrap(),
         })
     }
 
     pub fn run(&self, img: &RgbImage, face: &detection::Face) -> Result<Face> {
         let mut bounds = face.bounds.clone();
         // pad 25% on each side
-        bounds.w = (bounds.w as f32 * 1.5).round() as u32;
-        bounds.h = (bounds.h as f32 * 1.5).round() as u32;
+        bounds.scale(1.5);
 
         let view = *img.view(bounds.left(), bounds.top(), bounds.w, bounds.h);
 

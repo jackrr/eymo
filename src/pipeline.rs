@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use anyhow::Result;
 use image::{Rgb, RgbImage};
 
@@ -5,7 +7,7 @@ use crate::shapes::npoint::NPoint;
 use detection::FaceDetector;
 use imageproc::drawing;
 use landmarks::FaceLandmarker;
-use log::debug;
+use log::{debug, info};
 
 mod detection;
 mod landmarks;
@@ -38,12 +40,16 @@ impl Pipeline {
     }
 
     pub fn run(&self, img: &RgbImage) -> Result<Detection> {
+        let start = Instant::now();
         let face_bounds = self.face_detector.run(img)?;
+        info!("Detector took {}ms", start.elapsed().as_millis());
         let mut faces = Vec::new();
 
         for face_bound in face_bounds {
             debug!("Face bound: {face_bound:?}");
+            let start = Instant::now();
             let face = self.face_landmarker.run(img, &face_bound)?;
+            info!("Landmarker took {}ms", start.elapsed().as_millis());
             debug!("Face features: {face:?}");
 
             faces.push(face);

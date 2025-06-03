@@ -1,3 +1,6 @@
+use log::warn;
+use std::panic;
+
 use super::point::{Point, PointF32};
 
 // TODO: make rect generic to u32 or f32
@@ -111,6 +114,25 @@ impl Rect {
             x: self.x,
             y: self.y,
         }
+    }
+
+    pub fn scale(&mut self, mag: f32) -> Rect {
+        let res = panic::catch_unwind(|| {
+            let w = (self.w as f32 * mag).round() as u32;
+            let h = (self.h as f32 * mag).round() as u32;
+
+            (w, h)
+        });
+
+        match res {
+            Ok((w, h)) => {
+                self.w = w;
+                self.h = h
+            }
+            Err(e) => warn!("{e:?}"),
+        }
+
+        *self
     }
 
     pub fn from_tl(x: u32, y: u32, w: u32, h: u32) -> Rect {

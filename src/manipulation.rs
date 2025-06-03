@@ -1,24 +1,28 @@
 use anyhow::Result;
 pub use copy::Copy;
+pub use flip::Flip;
 use image::RgbImage;
+pub use rotate::Rotate;
+pub use scale::Scale;
 pub use swap::Swap;
+pub use tile::Tile;
 
 mod copy;
+mod flip;
+mod rotate;
+mod scale;
 mod swap;
-
-// TODO: bake out the implementations for each operation i care about
-// TODO: verify each on an input image -- verify nesting behavior as well
-// TODO: define the confiuration language + build corresponding parser
+mod tile;
+mod util;
 
 #[derive(Debug, Clone)]
 pub enum Operation {
-    Swap(Swap),
     Copy(Copy),
-    // Move,
-    // Rotate,
-    // Flip,
-    // Scale,
-    // Repeat,
+    Flip(Flip),
+    Rotate(Rotate),
+    Scale(Scale),
+    Swap(Swap),
+    Tile(Tile),
 }
 
 #[derive(Debug, Clone)]
@@ -36,15 +40,39 @@ impl From<Operation> for OperationTree {
     }
 }
 
+impl From<Copy> for Operation {
+    fn from(c: Copy) -> Operation {
+        Operation::Copy(c)
+    }
+}
+
+impl From<Flip> for Operation {
+    fn from(c: Flip) -> Operation {
+        Operation::Flip(c)
+    }
+}
+
+impl From<Rotate> for Operation {
+    fn from(c: Rotate) -> Operation {
+        Operation::Rotate(c)
+    }
+}
+
+impl From<Scale> for Operation {
+    fn from(c: Scale) -> Operation {
+        Operation::Scale(c)
+    }
+}
+
 impl From<Swap> for Operation {
     fn from(s: Swap) -> Operation {
         Operation::Swap(s)
     }
 }
 
-impl From<Copy> for Operation {
-    fn from(c: Copy) -> Operation {
-        Operation::Copy(c)
+impl From<Tile> for Operation {
+    fn from(o: Tile) -> Operation {
+        Operation::Tile(o)
     }
 }
 
@@ -55,6 +83,18 @@ pub trait Executable {
 impl Executable for OperationTree {
     fn execute(&self, img: &mut RgbImage) -> Result<()> {
         match &self.op {
+            Operation::Rotate(o) => {
+                o.execute(img)?;
+            }
+            Operation::Flip(o) => {
+                o.execute(img)?;
+            }
+            Operation::Scale(o) => {
+                o.execute(img)?;
+            }
+            Operation::Tile(o) => {
+                o.execute(img)?;
+            }
             Operation::Swap(s) => {
                 s.execute(img)?;
             }

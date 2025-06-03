@@ -19,8 +19,9 @@ use nokhwa::{
     CallbackCamera,
 };
 
+// TODO: make these configurable
 const TARGET_FPS: u32 = 30;
-const MAX_LAG_MS: u128 = 50;
+const MAX_LAG_MS: u128 = 100;
 
 pub fn process_frames(
     max_threads: usize,
@@ -68,7 +69,7 @@ pub fn process_frames(
                 drop(latest_frame);
 
                 match process_frame(
-                    (MAX_LAG_MS - rec_at.elapsed().as_millis()) as u32,
+                    MAX_LAG_MS.saturating_sub(rec_at.elapsed().as_millis()) as u32,
                     &mut image,
                     detection,
                 ) {
@@ -102,7 +103,6 @@ pub fn process_frames(
 
     while !receiver.is_disconnected() {
         let frame_thread = receiver.recv()?;
-        // TODO: frame rate logging
         match frame_thread.join() {
             Ok((frame_idx, image)) => {
                 if output_frame_idx > frame_idx {

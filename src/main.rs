@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::manipulation::{Copy, Executable, Operation, OperationTree, Swap};
+use crate::manipulation::{Copy, Executable, Operation, OperationTree, Swap, Tile};
 use crate::pipeline::Pipeline;
 use crate::video::process_frames;
 mod manipulation;
@@ -68,9 +68,12 @@ fn main() -> Result<()> {
         };
 
         if let Some(img) = img {
-            if let Ok(face) = pipeline.run(&img) {
-                let mut d = detection_result.write().unwrap();
-                *d = Some(face);
+            match pipeline.run(&img) {
+                Ok(face) => {
+                    let mut d = detection_result.write().unwrap();
+                    *d = Some(face)
+                }
+                Err(e) => warn!("{e:?}"),
             }
         } else {
             thread::sleep(Duration::from_millis(1));
@@ -118,23 +121,30 @@ fn process_frame(
 
     let mut ops: Vec<OperationTree> = Vec::new();
 
-    for face in face_detection.faces {
-        let mouth = face.mouth;
-        let l_eye = face.l_eye;
-        let r_eye = face.r_eye;
+    // for face in face_detection.faces {
+    //     let mouth = face.mouth;
+    //     let l_eye = face.l_eye;
+    //     let r_eye = face.r_eye;
 
-        let swap: Operation = Swap::new(mouth.clone().into(), l_eye.into()).into();
-        let copy: Operation = Copy::new(mouth.into(), r_eye.into()).into();
-        ops.push(swap.into());
-        ops.push(copy.into());
+    //     let swap: Operation = Swap::new(mouth.clone().into(), l_eye.into()).into();
+    //     let copy: Operation = Copy::new(mouth.into(), r_eye.into()).into();
+    //     ops.push(swap.into());
+    //     ops.push(copy.into());
+
+    //     ops
+    // }
+
+    if face_detection.faces.len() > 0 {
+        let face = face_detection.faces[0].clone();
+        let tile: Operation = Tile::new(face.mouth.into(), 1.).into();
+        ops.push(tile.into());
     }
 
     for (idx, op) in ops.iter().enumerate() {
         // TODO: refactor op list execution to operate "chunkwise",
         // allowing time to be checked here before resuming
-
-        op.execute(img)?;
         check_time(within_ms, start, &format!("Image Manipulation {idx}"))?;
+        op.execute(img)?;
     }
 
     Ok(())

@@ -1,0 +1,289 @@
+use super::point::{Point, Pointi32};
+
+use super::rect::Rect;
+
+#[derive(Debug, Clone)]
+pub struct Polygon {
+    pub points: Vec<Point>,
+    points_i32: Vec<Pointi32>,
+}
+
+impl Polygon {
+    pub fn new(points: Vec<Point>) -> Self {
+        let points_i32 = points.iter().map(|p| p.clone().into()).collect();
+        Self { points, points_i32 }
+    }
+
+    fn contains_point(&self, point: Point) -> bool {
+        let point: Pointi32 = point.into();
+        let n = self.points_i32.len();
+        if n < 3 {
+            return false;
+        }
+
+        // First check if point is on any edge or vertex
+        if self.point_on_boundary(point) {
+            return true;
+        }
+
+        // Ray casting algorithm for interior points
+        let mut inside = false;
+        let mut j = n - 1;
+
+        for i in 0..n {
+            let vi = self.points_i32[i];
+            let vj = self.points_i32[j];
+
+            if ((vi.y > point.y) != (vj.y > point.y)) && self.point_left_of_edge(point, vi, vj) {
+                inside = !inside;
+            }
+            j = i;
+        }
+
+        inside
+    }
+
+    fn point_on_boundary(&self, point: Pointi32) -> bool {
+        let n = self.points_i32.len();
+
+        // Check if point is a vertex
+        if self.points_i32.contains(&point) {
+            return true;
+        }
+
+        // Check if point is on any edge
+        for i in 0..n {
+            let p1 = self.points_i32[i];
+            let p2 = self.points_i32[(i + 1) % n];
+
+            if self.point_on_edge(point, p1, p2) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn point_on_edge(&self, point: Pointi32, p1: Pointi32, p2: Pointi32) -> bool {
+        // Check if point is collinear with p1 and p2
+        let cross_product = (point.y - p1.y) * (p2.x - p1.x) - (point.x - p1.x) * (p2.y - p1.y);
+
+        if cross_product != 0 {
+            return false; // Not collinear
+        }
+
+        // Check if point is within the bounding box of the edge
+        let min_x = p1.x.min(p2.x);
+        let max_x = p1.x.max(p2.x);
+        let min_y = p1.y.min(p2.y);
+        let max_y = p1.y.max(p2.y);
+
+        point.x >= min_x && point.x <= max_x && point.y >= min_y && point.y <= max_y
+    }
+
+    fn point_left_of_edge(&self, point: Pointi32, p1: Pointi32, p2: Pointi32) -> bool {
+        // Use integer arithmetic to avoid floating point precision issues
+        // Check if point.x < p1.x + (p2.x - p1.x) * (point.y - p1.y) / (p2.y - p1.y)
+        // Rearranged to avoid division: (point.x - p1.x) * (p2.y - p1.y) < (p2.x - p1.x) * (point.y - p1.y)
+
+        let dx = p2.x - p1.x;
+        let dy = p2.y - p1.y;
+
+        if dy == 0 {
+            return false; // Horizontal edge, skip
+        }
+
+        let left_side = (point.x - p1.x) * dy;
+        let right_side = dx * (point.y - p1.y);
+
+        if dy > 0 {
+            left_side < right_side
+        } else {
+            left_side > right_side
+        }
+    }
+
+    // Iterate across rows, starting at "apex polygon with lowest Y"
+    pub fn iter_inner_points(&self) -> PolygonInteriorIter {
+        PolygonInteriorIter::new(self.clone())
+    }
+}
+
+pub struct PolygonInteriorIter {
+    last: Option<Point>,
+    exhausted: bool,
+    min_x: u32,
+    max_x: u32,
+    // min_y: u32,
+    max_y: u32,
+    polygon: Polygon,
+}
+
+impl PolygonInteriorIter {
+    fn new(polygon: Polygon) -> Self {
+        let points = polygon.points.clone();
+        Self {
+            min_x: points.iter().map(|p| p.x).fold(u32::MAX, u32::min),
+            max_x: points.iter().map(|p| p.x).fold(0, u32::max),
+            // min_y: points.iter().map(|p| p.y).fold(u32::MAX, u32::min),
+            max_y: points.iter().map(|p| p.y).fold(0, u32::max),
+            polygon,
+            last: None,
+            exhausted: false,
+        }
+    }
+
+    fn first_point(&self) -> Option<Point> {
+        let res = self.polygon.points.iter().reduce(|smallest, p| {
+            if (p.y == smallest.y && p.x < smallest.x) || p.y < smallest.y {
+                p
+            } else {
+                smallest
+            }
+        });
+
+        match res {
+            Some(p) => p.clone().into(),
+            None => None,
+        }
+    }
+
+    fn point_after(&self, p: &mut Point) -> Option<Point> {
+        // Scan L->R, skip row once not contained
+        let mut next = Point { x: p.x + 1, y: p.y };
+
+        while p.x < self.max_x || p.y < self.max_y {
+            if self.polygon.contains_point(next) {
+                return Some(next);
+            }
+            next.x += 1;
+            if next.x > self.max_x {
+                next.y += 1;
+                next.x = self.min_x;
+            }
+        }
+        None
+    }
+}
+
+impl Iterator for PolygonInteriorIter {
+    // We can refer to this type using Self::Item
+    type Item = Point;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.exhausted {
+            return None;
+        }
+
+        match self.last {
+            Some(p) => match self.point_after(&mut p.clone()) {
+                Some(p) => {
+                    self.last = p.clone().into();
+                    Some(p)
+                }
+                None => {
+                    self.exhausted = true;
+                    None
+                }
+            },
+            None => match self.first_point() {
+                Some(p) => {
+                    self.last = p.clone().into();
+                    p.into()
+                }
+                None => {
+                    self.exhausted = true;
+                    None
+                }
+            },
+        }
+    }
+}
+
+impl From<Polygon> for Rect {
+    fn from(poly: Polygon) -> Rect {
+        let max_x = poly
+            .points
+            .iter()
+            .fold(poly.points[0].x, |max, p| max.max(p.x));
+        let min_x = poly
+            .points
+            .iter()
+            .fold(poly.points[0].x, |min, p| min.min(p.x));
+        let max_y = poly
+            .points
+            .iter()
+            .fold(poly.points[0].y, |max, p| max.max(p.y));
+        let min_y = poly
+            .points
+            .iter()
+            .fold(poly.points[0].y, |min, p| min.min(p.y));
+
+        Rect::from_tl(min_x, min_y, max_x - min_x, max_y - min_y)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::iter::zip;
+
+    #[test]
+    fn test_contains_point() {
+        let polygon = Polygon::new(Vec::from([
+            Point::new(0, 0),
+            Point::new(3, 0),
+            Point::new(3, 3),
+        ]));
+        /*
+        3 n n y
+        2 n y y
+        1 y y y
+        0 1 2 3
+        */
+
+        assert!(polygon.contains_point(Point::new(0, 0)));
+        assert!(polygon.contains_point(Point::new(2, 1)));
+        assert!(polygon.contains_point(Point::new(1, 0)));
+        assert!(polygon.contains_point(Point::new(1, 1)));
+        assert!(polygon.contains_point(Point::new(2, 0)));
+
+        assert!(polygon.contains_point(Point::new(2, 2)));
+        assert!(polygon.contains_point(Point::new(3, 0)));
+        assert!(polygon.contains_point(Point::new(3, 1)));
+        assert!(polygon.contains_point(Point::new(3, 2)));
+        assert!(polygon.contains_point(Point::new(3, 3)));
+
+        assert!(!polygon.contains_point(Point::new(4, 4)));
+        assert!(!polygon.contains_point(Point::new(3, 4)));
+        assert!(!polygon.contains_point(Point::new(4, 3)));
+        assert!(!polygon.contains_point(Point::new(0, 4)));
+        assert!(!polygon.contains_point(Point::new(0, 1)));
+        assert!(!polygon.contains_point(Point::new(1, 2)));
+    }
+
+    #[test]
+    fn test_polygon_inner() {
+        let polygon = Polygon::new(Vec::from([
+            Point::new(0, 0),
+            Point::new(0, 2),
+            Point::new(3, 2),
+        ]));
+        let actual: Vec<Point> = polygon.iter_inner_points().collect();
+
+        let expected = [
+            Point::new(0, 0),
+            Point::new(0, 1),
+            Point::new(1, 1),
+            Point::new(0, 2),
+            Point::new(1, 2),
+            Point::new(2, 2),
+            Point::new(3, 2),
+        ];
+
+        assert_eq!(actual.len(), expected.len());
+        for (actual, expected) in zip(actual, expected) {
+            assert_eq!(actual, expected);
+        }
+    }
+}

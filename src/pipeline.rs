@@ -3,7 +3,7 @@ use std::time::Instant;
 use anyhow::Result;
 use image::{Rgb, RgbImage};
 
-use crate::shapes::npoint::NPoint;
+use crate::shapes::polygon::Polygon;
 use detection::FaceDetector;
 use imageproc::drawing;
 use landmarks::FaceLandmarker;
@@ -20,10 +20,10 @@ pub struct Pipeline {
 
 #[derive(Debug, Clone)]
 pub struct Face {
-    pub l_eye: NPoint,
-    pub r_eye: NPoint,
-    pub mouth: NPoint,
-    pub nose: NPoint,
+    pub l_eye: Polygon,
+    pub r_eye: Polygon,
+    pub mouth: Polygon,
+    pub nose: Polygon,
 }
 
 #[derive(Debug, Clone)]

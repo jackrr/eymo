@@ -136,6 +136,9 @@ fn process_frame(
 
     if face_detection.faces.len() > 0 {
         let face = face_detection.faces[0].clone();
+        let mouth_interior_points: Vec<shapes::point::Point> =
+            face.mouth.iter_inner_points().collect();
+        debug!("{mouth_interior_points:?}");
         let tile: Operation = Tile::new(face.mouth.into(), 1.).into();
         ops.push(tile.into());
     }

@@ -1,8 +1,8 @@
 use super::detection;
 use super::model::{initialize_model, Session};
 use super::Face;
-use crate::shapes::npoint::NPoint;
 use crate::shapes::point::Point;
+use crate::shapes::polygon::Polygon;
 use anyhow::Result;
 use image::imageops::{resize, FilterType};
 use image::{GenericImage, GenericImageView, Rgb, RgbImage};
@@ -137,7 +137,7 @@ fn extract_feature(
     y_scale: f32,
     origin: &Point,
     rotation: f32,
-) -> NPoint {
+) -> Polygon {
     let mut points = Vec::new();
 
     for i in kpt_idxs {
@@ -152,5 +152,5 @@ fn extract_feature(
         points.push(p)
     }
 
-    NPoint { points }
+    Polygon::new(points)
 }

@@ -1,17 +1,17 @@
-use super::npoint::NPoint;
+use super::polygon::Polygon;
 use super::rect::Rect;
 
 #[derive(Debug, Clone)]
 pub enum Shape {
     Rect(Rect),
-    NPoint(NPoint),
+    Polygon(Polygon),
 }
 
 impl From<Shape> for Rect {
     fn from(s: Shape) -> Rect {
         match s {
             Shape::Rect(s) => s,
-            Shape::NPoint(s) => s.into(),
+            Shape::Polygon(s) => s.into(),
         }
     }
 }
@@ -22,9 +22,9 @@ impl From<Rect> for Shape {
     }
 }
 
-impl From<NPoint> for Shape {
-    fn from(n: NPoint) -> Shape {
-        Shape::NPoint(n)
+impl From<Polygon> for Shape {
+    fn from(n: Polygon) -> Shape {
+        Shape::Polygon(n)
     }
 }
 

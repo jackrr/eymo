@@ -1,6 +1,7 @@
 use super::point::{Point, Pointi32};
 
 use super::rect::Rect;
+use super::shape::Shape;
 
 #[derive(Debug, Clone)]
 pub struct Polygon {
@@ -14,6 +15,29 @@ impl Polygon {
         Self { points, points_i32 }
     }
 
+    pub fn project(&self, s: impl Into<Shape>) -> Self {
+        // remaps own coordinates to coordinate space of s
+        let srect: Rect = s.into().into();
+        let mrect = Rect::from(self.clone());
+
+        let mut points = Vec::new();
+
+        let dx = srect.left() as i32 - mrect.left() as i32;
+        let dy = srect.top() as i32 - mrect.top() as i32;
+        let x_scale = srect.w as f32 / mrect.w as f32;
+        let y_scale = srect.h as f32 / mrect.h as f32;
+
+        for p in &self.points {
+            points.push(Point::new(
+                (x_scale * (p.x as i32 + dx) as f32).round() as u32,
+                (y_scale * (p.y as i32 + dy) as f32).round() as u32,
+            ));
+        }
+
+        Self::new(points)
+    }
+
+    // FYI contains_point (and underlying fns provided by Claude4.0)
     fn contains_point(&self, point: Point) -> bool {
         let point: Pointi32 = point.into();
         let n = self.points_i32.len();
@@ -107,16 +131,87 @@ impl Polygon {
     pub fn iter_inner_points(&self) -> PolygonInteriorIter {
         PolygonInteriorIter::new(self.clone())
     }
+
+    pub fn iter_points_with_projection(&self, other: impl Into<Shape>) -> ProjectedPolygonIter {
+        ProjectedPolygonIter::new(self.clone(), other)
+    }
+
+    pub fn iter_projected_points(&self, projection: &Polygon) -> ProjectedPolygonIter {
+        ProjectedPolygonIter::from_projected_polygons(self.clone(), projection.clone())
+    }
 }
 
 pub struct PolygonInteriorIter {
     last: Option<Point>,
-    exhausted: bool,
+    started: bool,
     min_x: u32,
     max_x: u32,
-    // min_y: u32,
     max_y: u32,
     polygon: Polygon,
+}
+
+pub struct ProjectedPolygonIter {
+    iter: PolygonInteriorIter,
+    dx: i32,
+    dy: i32,
+    x_scale: f32,
+    y_scale: f32,
+}
+
+impl ProjectedPolygonIter {
+    // Pairwise iteration of a projection and the original
+    // Uses larger as base iterator to prevent sparsity
+    pub fn new(a: Polygon, b: impl Into<Shape>) -> Self {
+        // TODO: conditionally set a/b depending on the "larger" of the two
+        let other = a.project(b);
+        let srect: Rect = a.clone().into();
+        let mrect = Rect::from(other);
+
+        let dx = mrect.left() as i32 - srect.left() as i32;
+        let dy = mrect.top() as i32 - srect.top() as i32;
+        let x_scale = srect.w as f32 / mrect.w as f32;
+        let y_scale = srect.h as f32 / mrect.h as f32;
+        Self {
+            iter: a.iter_inner_points(),
+            dx,
+            dy,
+            x_scale,
+            y_scale,
+        }
+    }
+
+    pub fn from_projected_polygons(a: Polygon, projection: Polygon) -> Self {
+        let srect: Rect = a.clone().into();
+        let mrect = Rect::from(projection);
+
+        let dx = mrect.left() as i32 - srect.left() as i32;
+        let dy = mrect.top() as i32 - srect.top() as i32;
+        let x_scale = srect.w as f32 / mrect.w as f32;
+        let y_scale = srect.h as f32 / mrect.h as f32;
+        Self {
+            iter: a.iter_inner_points(),
+            dx,
+            dy,
+            x_scale,
+            y_scale,
+        }
+    }
+}
+
+impl Iterator for ProjectedPolygonIter {
+    type Item = (Point, Point);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.iter.next() {
+            Some(p) => {
+                let x = (self.x_scale * (p.x as i32 + self.dx) as f32).round() as u32;
+                let y = (self.y_scale * (p.y as i32 + self.dy) as f32).round() as u32;
+
+                Some((p, Point::new(x, y)))
+            }
+            None => None,
+        }
+    }
 }
 
 impl PolygonInteriorIter {
@@ -129,7 +224,7 @@ impl PolygonInteriorIter {
             max_y: points.iter().map(|p| p.y).fold(0, u32::max),
             polygon,
             last: None,
-            exhausted: false,
+            started: false,
         }
     }
 
@@ -150,16 +245,15 @@ impl PolygonInteriorIter {
 
     fn point_after(&self, p: &mut Point) -> Option<Point> {
         // Scan L->R, skip row once not contained
-        let mut next = Point { x: p.x + 1, y: p.y };
-
+        p.x += 1;
         while p.x < self.max_x || p.y < self.max_y {
-            if self.polygon.contains_point(next) {
-                return Some(next);
+            if self.polygon.contains_point(*p) {
+                return Some(*p);
             }
-            next.x += 1;
-            if next.x > self.max_x {
-                next.y += 1;
-                next.x = self.min_x;
+            p.x += 1;
+            if p.x > self.max_x {
+                p.y += 1;
+                p.x = self.min_x;
             }
         }
         None
@@ -167,35 +261,32 @@ impl PolygonInteriorIter {
 }
 
 impl Iterator for PolygonInteriorIter {
-    // We can refer to this type using Self::Item
     type Item = Point;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.exhausted {
-            return None;
-        }
-
-        match self.last {
-            Some(p) => match self.point_after(&mut p.clone()) {
+        let last = self.last.take();
+        match last {
+            Some(mut p) => match self.point_after(&mut p) {
                 Some(p) => {
                     self.last = p.clone().into();
                     Some(p)
                 }
-                None => {
-                    self.exhausted = true;
-                    None
-                }
+                None => None,
             },
-            None => match self.first_point() {
-                Some(p) => {
-                    self.last = p.clone().into();
-                    p.into()
-                }
-                None => {
-                    self.exhausted = true;
+            None => {
+                if self.started {
                     None
+                } else {
+                    self.started = true;
+                    match self.first_point() {
+                        Some(p) => {
+                            self.last = p.clone().into();
+                            p.into()
+                        }
+                        None => None,
+                    }
                 }
-            },
+            }
         }
     }
 }

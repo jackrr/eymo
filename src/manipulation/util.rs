@@ -14,5 +14,3 @@ pub fn image_at(bounds: Rect, src: &RgbImage) -> Result<RgbImage> {
 
     Ok(img)
 }
-
-// pub fn copy_shape

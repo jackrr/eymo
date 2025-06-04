@@ -6,19 +6,20 @@ use image::{GenericImage, GenericImageView, RgbImage};
 #[derive(Debug, Clone)]
 pub struct Scale {
     target: Shape,
-    theta: f32,
+    zoom: f32,
 }
 
 impl Scale {
-    pub fn new(target: Shape, theta: f32) -> Self {
-        Self { target, theta }
+    pub fn new(target: Shape, zoom: f32) -> Self {
+        Self { target, zoom }
     }
 }
 
 impl Executable for Scale {
     fn execute(&self, img: &mut RgbImage) -> Result<()> {
-        // TODO: support polygon operations
-        // Right now this converts all polygons to containing rect
+        // Expands feature by zoom level within image, taking over a
+        // larger footprint
+        // TODO: implement me
         Err(Error::msg("Scale not implemented."))
     }
 }

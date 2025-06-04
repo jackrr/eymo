@@ -40,6 +40,7 @@ impl Executable for Tile {
         let target_width = img.width();
         let target_height = img.height();
 
+        // TODO: use cropped image and final column and row
         while (y_offset + src_height) < target_height {
             img.copy_from(&tileable, x_offset, y_offset)?;
             x_offset += tileable.width();

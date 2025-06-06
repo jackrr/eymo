@@ -94,13 +94,13 @@ impl Into<imageproc::rect::Rect> for Rect {
 #[allow(dead_code)]
 impl Rect {
     pub fn left(&self) -> u32 {
-        self.x.saturating_sub(self.w / 2)
+        self.x - self.w / 2
     }
     pub fn right(&self) -> u32 {
         self.x + self.w / 2
     }
     pub fn top(&self) -> u32 {
-        self.y.saturating_sub(self.h / 2)
+        self.y - self.h / 2
     }
     pub fn bottom(&self) -> u32 {
         self.y + self.h / 2
@@ -116,21 +116,33 @@ impl Rect {
         }
     }
 
-    pub fn scale(&mut self, mag: f32) -> Rect {
-        let res = panic::catch_unwind(|| {
-            let w = (self.w as f32 * mag).round() as u32;
-            let h = (self.h as f32 * mag).round() as u32;
+    pub fn scale_x(&mut self, mag: f32, max: u32) -> Rect {
+        // Ensure we don't go <0 on x axis
+        let new_w = self.w as f32 * mag;
+        let new_l = (self.x as f32 - new_w / 2.).max(0.).round() as u32;
+        let new_r = ((self.x as f32 + new_w / 2.).round() as u32).min(max);
 
-            (w, h)
-        });
+        self.w = new_r - new_l;
+        self.x = new_l + self.w / 2;
 
-        match res {
-            Ok((w, h)) => {
-                self.w = w;
-                self.h = h
-            }
-            Err(e) => warn!("{e:?}"),
-        }
+        *self
+    }
+
+    pub fn scale_y(&mut self, mag: f32, max: u32) -> Rect {
+        // Ensure we don't go <0 on x axis
+        let new_h = self.h as f32 * mag;
+        let new_t = (self.y as f32 - new_h / 2.).round().max(0.) as u32;
+        let new_b = ((self.y as f32 + new_h / 2.).round() as u32).min(max);
+
+        self.h = new_b - new_t;
+        self.y = new_t + self.h / 2;
+
+        *self
+    }
+
+    pub fn scale(&mut self, mag: f32, max_x: u32, max_y: u32) -> Rect {
+        self.scale_x(mag, max_x);
+        self.scale_y(mag, max_y);
 
         *self
     }

@@ -43,7 +43,7 @@ impl FaceLandmarker {
     pub fn run(&self, img: &RgbImage, face: &detection::Face) -> Result<Face> {
         let mut bounds = face.bounds.clone();
         // pad 25% on each side
-        bounds.scale(1.5);
+        bounds.scale(1.5, img.width(), img.height());
 
         let view = *img.view(bounds.left(), bounds.top(), bounds.w, bounds.h);
 

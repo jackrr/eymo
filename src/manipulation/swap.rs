@@ -32,13 +32,13 @@ impl Executable for Swap {
                     swap_rects(img, (*a).clone(), *b)?;
                 }
                 Shape::Polygon(b) => {
-                    for (ap, bp) in a.iter_points_with_projection((*b).clone()) {
-                        let bpx = img.get_pixel(bp.x, bp.y).clone();
-                        let apx = img.get_pixel(ap.x, ap.y).clone();
+                    // for (ap, bp) in a.iter_points_with_projection((*b).clone()) {
+                    //     let bpx = img.get_pixel(bp.x, bp.y).clone();
+                    //     let apx = img.get_pixel(ap.x, ap.y).clone();
 
-                        img.put_pixel(bp.x, bp.y, apx);
-                        img.put_pixel(ap.x, ap.y, bpx);
-                    }
+                    //     img.put_pixel(bp.x, bp.y, apx);
+                    //     img.put_pixel(ap.x, ap.y, bpx);
+                    // }
                 }
             },
         }

@@ -116,6 +116,13 @@ impl Rect {
         }
     }
 
+    pub fn resize(&mut self, width: u32, height: u32) -> Self {
+        self.w = width;
+        self.h = height;
+
+        *self
+    }
+
     pub fn scale_x(&mut self, mag: f32, max: u32) -> Rect {
         // Ensure we don't go <0 on x axis
         let new_w = self.w as f32 * mag;

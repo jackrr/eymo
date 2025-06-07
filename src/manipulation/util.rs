@@ -4,8 +4,8 @@ use image::{GenericImage, GenericImageView, RgbImage};
 
 pub fn image_at(bounds: Rect, src: &RgbImage) -> Result<RgbImage> {
     let view = *src.view(
-        bounds.x.try_into().unwrap(),
-        bounds.y.try_into().unwrap(),
+        bounds.left().try_into().unwrap(),
+        bounds.top().try_into().unwrap(),
         bounds.w,
         bounds.h,
     );

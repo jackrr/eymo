@@ -1,4 +1,5 @@
 use super::point::{Point, Pointi32};
+use log::debug;
 
 use super::rect::Rect;
 use super::shape::Shape;
@@ -15,23 +16,20 @@ impl Polygon {
         Self { points, points_i32 }
     }
 
-    pub fn project(&self, s: impl Into<Shape>) -> Self {
+    pub fn resize(&self, width: u32, height: u32) -> Self {
+        let mut bound: Rect = self.clone().into();
+        self.project(bound.resize(width, height))
+    }
+
+    pub fn project(&self, project: impl Into<Shape>) -> Self {
         // remaps own coordinates to coordinate space of s
-        let srect: Rect = s.into().into();
-        let mrect = Rect::from(self.clone());
+        let proj_rect: Rect = project.into().into();
+        let self_rect = Rect::from(self.clone());
 
         let mut points = Vec::new();
 
-        let dx = srect.left() as i32 - mrect.left() as i32;
-        let dy = srect.top() as i32 - mrect.top() as i32;
-        let x_scale = srect.w as f32 / mrect.w as f32;
-        let y_scale = srect.h as f32 / mrect.h as f32;
-
         for p in &self.points {
-            points.push(Point::new(
-                (x_scale * (p.x as i32 + dx) as f32).round() as u32,
-                (y_scale * (p.y as i32 + dy) as f32).round() as u32,
-            ));
+            points.push(p.project(&self_rect, &proj_rect));
         }
 
         Self::new(points)
@@ -132,12 +130,8 @@ impl Polygon {
         PolygonInteriorIter::new(self.clone())
     }
 
-    pub fn iter_points_with_projection(&self, other: impl Into<Shape>) -> ProjectedPolygonIter {
+    pub fn iter_pairwise_projection_onto(&self, other: impl Into<Shape>) -> ProjectedPolygonIter {
         ProjectedPolygonIter::new(self.clone(), other)
-    }
-
-    pub fn iter_projected_points(&self, projection: &Polygon) -> ProjectedPolygonIter {
-        ProjectedPolygonIter::from_projected_polygons(self.clone(), projection.clone())
     }
 }
 
@@ -152,48 +146,18 @@ pub struct PolygonInteriorIter {
 
 pub struct ProjectedPolygonIter {
     iter: PolygonInteriorIter,
-    dx: i32,
-    dy: i32,
-    x_scale: f32,
-    y_scale: f32,
+    proj_rect: Rect,
+    self_rect: Rect,
 }
 
 impl ProjectedPolygonIter {
     // Pairwise iteration of a projection and the original
-    // Uses larger as base iterator to prevent sparsity
-    pub fn new(a: Polygon, b: impl Into<Shape>) -> Self {
-        // TODO: conditionally set a/b depending on the "larger" of the two
-        let other = a.project(b);
-        let srect: Rect = a.clone().into();
-        let mrect = Rect::from(other);
-
-        let dx = mrect.left() as i32 - srect.left() as i32;
-        let dy = mrect.top() as i32 - srect.top() as i32;
-        let x_scale = srect.w as f32 / mrect.w as f32;
-        let y_scale = srect.h as f32 / mrect.h as f32;
+    // Use larger as base iterator to prevent sparsity
+    fn new(a: Polygon, b: impl Into<Shape>) -> Self {
         Self {
             iter: a.iter_inner_points(),
-            dx,
-            dy,
-            x_scale,
-            y_scale,
-        }
-    }
-
-    pub fn from_projected_polygons(a: Polygon, projection: Polygon) -> Self {
-        let srect: Rect = a.clone().into();
-        let mrect = Rect::from(projection);
-
-        let dx = mrect.left() as i32 - srect.left() as i32;
-        let dy = mrect.top() as i32 - srect.top() as i32;
-        let x_scale = srect.w as f32 / mrect.w as f32;
-        let y_scale = srect.h as f32 / mrect.h as f32;
-        Self {
-            iter: a.iter_inner_points(),
-            dx,
-            dy,
-            x_scale,
-            y_scale,
+            self_rect: a.clone().into(),
+            proj_rect: Rect::from(a.project(b)),
         }
     }
 }
@@ -203,12 +167,7 @@ impl Iterator for ProjectedPolygonIter {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.iter.next() {
-            Some(p) => {
-                let x = (self.x_scale * (p.x as i32 + self.dx) as f32).round() as u32;
-                let y = (self.y_scale * (p.y as i32 + self.dy) as f32).round() as u32;
-
-                Some((p, Point::new(x, y)))
-            }
+            Some(p) => Some((p, p.project(&self.self_rect, &self.proj_rect))),
             None => None,
         }
     }
@@ -246,7 +205,7 @@ impl PolygonInteriorIter {
     fn point_after(&self, p: &mut Point) -> Option<Point> {
         // Scan L->R, skip row once not contained
         p.x += 1;
-        while p.x < self.max_x || p.y < self.max_y {
+        while p.y <= self.max_y {
             if self.polygon.contains_point(*p) {
                 return Some(*p);
             }
@@ -318,6 +277,75 @@ impl From<Polygon> for Rect {
 mod tests {
     use super::*;
     use std::iter::zip;
+
+    #[test]
+    fn test_project() {
+        let polygon = Polygon::new(Vec::from([
+            Point::new(0, 0),
+            Point::new(0, 1),
+            Point::new(1, 1),
+            Point::new(1, 0),
+        ]));
+
+        let actual = polygon.project(Rect::from_tl(1, 1, 1, 1));
+
+        assert_eq!(actual.points[0], Point::new(1, 1));
+        assert_eq!(actual.points[1], Point::new(1, 2));
+        assert_eq!(actual.points[2], Point::new(2, 2));
+        assert_eq!(actual.points[3], Point::new(2, 1));
+    }
+
+    #[test]
+    fn test_project_bigger() {
+        let polygon = Polygon::new(Vec::from([
+            Point::new(0, 0),
+            Point::new(0, 1),
+            Point::new(1, 1),
+            Point::new(1, 0),
+        ]));
+
+        let actual = polygon.project(Rect::from_tl(1, 1, 2, 2));
+
+        assert_eq!(actual.points[0], Point::new(1, 1));
+        assert_eq!(actual.points[1], Point::new(1, 3));
+        assert_eq!(actual.points[2], Point::new(3, 3));
+        assert_eq!(actual.points[3], Point::new(3, 1));
+    }
+
+    #[test]
+    fn test_project_smaller() {
+        let polygon = Polygon::new(Vec::from([
+            Point::new(0, 0),
+            Point::new(0, 2),
+            Point::new(2, 2),
+            Point::new(2, 0),
+        ]));
+
+        let actual = polygon.project(Rect::from_tl(1, 1, 1, 1));
+
+        assert_eq!(actual.points[0], Point::new(1, 1));
+        assert_eq!(actual.points[1], Point::new(1, 2));
+        assert_eq!(actual.points[2], Point::new(2, 2));
+        assert_eq!(actual.points[3], Point::new(2, 1));
+    }
+
+    #[test]
+    fn test_project_poly() {
+        let polygon = Polygon::new(Vec::from([
+            Point::new(5, 0),
+            Point::new(15, 0),
+            Point::new(15, 5),
+            Point::new(10, 10),
+            Point::new(5, 5),
+        ]));
+
+        let actual = polygon.project(Rect::from_tl(50, 50, 50, 50));
+        assert_eq!(actual.points[0], Point::new(50, 50));
+        assert_eq!(actual.points[1], Point::new(100, 50));
+        assert_eq!(actual.points[2], Point::new(100, 75));
+        assert_eq!(actual.points[3], Point::new(75, 100));
+        assert_eq!(actual.points[4], Point::new(50, 75));
+    }
 
     #[test]
     fn test_contains_point() {

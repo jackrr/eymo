@@ -1,7 +1,15 @@
-use super::Executable;
-use crate::shapes::{polygon::Polygon, rect::Rect, shape::Shape};
+use super::{util, Executable};
+use crate::shapes::{
+    polygon::{Polygon, ProjectedPolygonIter},
+    rect::Rect,
+    shape::Shape,
+};
 use anyhow::Result;
-use image::{GenericImage, RgbImage};
+use image::{
+    imageops::{resize, FilterType},
+    GenericImage, Rgb, RgbImage,
+};
+use log::debug;
 
 #[derive(Debug, Clone)]
 pub struct Copy {
@@ -17,22 +25,31 @@ impl Copy {
 
 impl Executable for Copy {
     fn execute(&self, img: &mut RgbImage) -> Result<()> {
+        let src_img = util::image_at(self.src.clone().into(), img)?;
+        let dest_rect: Rect = self.dest.clone().into();
+        let r_src = resize(&src_img, dest_rect.w, dest_rect.h, FilterType::Triangle);
+
         match &self.src {
             Shape::Rect(sr) => match &self.dest {
                 Shape::Rect(dr) => {
-                    img.copy_within((*sr).into(), dr.left(), dr.top());
+                    img.copy_from(&r_src, dr.left(), dr.top())?;
                 }
                 Shape::Polygon(dp) => {
-                    copy_pixels(img, &dp.project(*sr), dp);
+                    // TODO: verify this works
+                    let sr = Rect::from_tl(0, 0, r_src.width(), r_src.height());
+                    // This is going to be backward... need to invert src/dest from iterator
+                    copy_pixels(r_src, img, dp.iter_pairwise_projection_onto(sr));
                 }
             },
             Shape::Polygon(sp) => match &self.dest {
                 Shape::Rect(dr) => {
-                    // project shape sp onto dr, pulling only those pixels into img
-                    copy_pixels(img, sp, &sp.project(*dr));
+                    // TODO: verify this works
+                    let res = sp.project(Rect::from_tl(0, 0, r_src.width(), r_src.height()));
+                    copy_pixels(r_src, img, res.iter_pairwise_projection_onto(*dr));
                 }
                 Shape::Polygon(dp) => {
-                    copy_pixels(img, sp, &sp.project(dp.clone()));
+                    let res = sp.project(Rect::from_tl(0, 0, r_src.width(), r_src.height()));
+                    copy_pixels(r_src, img, res.iter_pairwise_projection_onto(dp.clone()));
                 }
             },
         }
@@ -41,13 +58,16 @@ impl Executable for Copy {
     }
 }
 
-fn copy_pixels(img: &mut RgbImage, src: &Polygon, dest: &Polygon) {
-    for (src_p, dest_p) in src.iter_projected_points(dest) {
-        let pixel = img.get_pixel(src_p.x, src_p.y);
-        if dest_p.x >= img.width() || dest_p.y >= img.height() {
-            // warn!("Invalid projected coordinate {x},{y}");
+fn copy_pixels(src: RgbImage, dest: &mut RgbImage, iter: ProjectedPolygonIter) {
+    for (src_p, dest_p) in iter {
+        if src_p.x >= src.width()
+            || src_p.y >= src.height()
+            || dest_p.x >= dest.width()
+            || dest_p.y >= dest.height()
+        {
             continue;
         }
-        img.put_pixel(dest_p.x, dest_p.y, pixel.clone());
+        let pixel = src.get_pixel(src_p.x, src_p.y);
+        dest.put_pixel(dest_p.x, dest_p.y, pixel.clone());
     }
 }

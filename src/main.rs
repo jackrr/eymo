@@ -43,8 +43,11 @@ fn main() -> Result<()> {
         Some(p) => {
             let mut img = ImageReader::open(&p)?.decode()?.into_rgb8();
             let start = Instant::now();
-            let result = pipeline.run_trace(&mut img);
+            let result = pipeline.run(&img)?;
             debug!("{result:?}");
+
+            process_frame(1000, &mut img, Arc::new(RwLock::new(Some(result))))?;
+
             debug!("Took {:?}", start.elapsed());
 
             let output_path: &str = &args.output_path.unwrap_or("tmp/result.png".to_string());
@@ -126,20 +129,14 @@ fn process_frame(
         let l_eye = face.l_eye;
         let r_eye = face.r_eye;
 
-        // let copy: Operation = Copy::new(mouth.clone().into(), r_eye.into()).into();
-        let swap: Operation = Swap::new(mouth.into(), l_eye.into()).into();
-        // ops.push(copy.into());
-        ops.push(swap.into());
-    }
+        let copy: Operation = Copy::new(mouth.clone().into(), r_eye.into()).into();
+        ops.push(copy.into());
+        let copy: Operation = Copy::new(l_eye.into(), mouth.into()).into();
+        ops.push(copy.into());
+        // let swap: Operation = Swap::new(mouth.into(), l_eye.into()).into();
 
-    // if face_detection.faces.len() > 0 {
-    //     let face = face_detection.faces[0].clone();
-    //     let mouth_interior_points: Vec<shapes::point::Point> =
-    //         face.mouth.iter_inner_points().collect();
-    //     debug!("{mouth_interior_points:?}");
-    //     let tile: Operation = Tile::new(face.mouth.into(), 1.).into();
-    //     ops.push(tile.into());
-    // }
+        // ops.push(swap.into());
+    }
 
     for (idx, op) in ops.iter().enumerate() {
         // TODO: refactor op list execution to operate "chunkwise",

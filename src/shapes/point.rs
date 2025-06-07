@@ -1,3 +1,5 @@
+use super::rect::Rect;
+
 #[derive(Debug, Clone, Copy)]
 pub struct PointF32 {
     pub x: f32,
@@ -42,6 +44,16 @@ impl Point {
         self.y = (rot_y.round() as i32 + origin.y as i32) as u32;
 
         *self
+    }
+
+    pub fn project(self, src: &Rect, target: &Rect) -> Self {
+        let x_offset_pct = (self.x - src.left()) as f32 / src.w as f32;
+        let y_offset_pct = (self.y - src.top()) as f32 / src.h as f32;
+
+        Self {
+            x: target.left() + (x_offset_pct * target.w as f32).round() as u32,
+            y: target.top() + (y_offset_pct * target.h as f32).round() as u32,
+        }
     }
 }
 

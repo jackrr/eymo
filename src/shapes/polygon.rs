@@ -148,6 +148,7 @@ pub struct ProjectedPolygonIter {
     iter: PolygonInteriorIter,
     proj_rect: Rect,
     self_rect: Rect,
+    inverted: bool,
 }
 
 impl ProjectedPolygonIter {
@@ -158,7 +159,12 @@ impl ProjectedPolygonIter {
             iter: a.iter_inner_points(),
             self_rect: a.clone().into(),
             proj_rect: Rect::from(a.project(b)),
+            inverted: false,
         }
+    }
+
+    pub fn invert(&mut self) {
+        self.inverted = !self.inverted;
     }
 }
 
@@ -167,7 +173,14 @@ impl Iterator for ProjectedPolygonIter {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.iter.next() {
-            Some(p) => Some((p, p.project(&self.self_rect, &self.proj_rect))),
+            Some(p) => {
+                let other = p.project(&self.self_rect, &self.proj_rect);
+                if self.inverted {
+                    Some((other, p))
+                } else {
+                    Some((p, other))
+                }
+            }
             None => None,
         }
     }

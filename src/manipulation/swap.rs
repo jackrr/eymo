@@ -2,6 +2,7 @@ use super::Executable;
 use crate::manipulation::util;
 use crate::shapes::{rect::Rect, shape::Shape};
 use anyhow::Result;
+use image::imageops::{resize, FilterType};
 use image::{GenericImage, RgbImage};
 
 #[derive(Debug, Clone)]
@@ -24,6 +25,9 @@ impl Executable for Swap {
                     swap_rects(img, *a, *b)?;
                 }
                 Shape::Polygon(b) => {
+                    // copy a -> pending
+                    // copy b -> a
+                    // copy pending -> b
                     swap_rects(img, *a, (*b).clone())?;
                 }
             },
@@ -32,13 +36,29 @@ impl Executable for Swap {
                     swap_rects(img, (*a).clone(), *b)?;
                 }
                 Shape::Polygon(b) => {
-                    // for (ap, bp) in a.iter_points_with_projection((*b).clone()) {
-                    //     let bpx = img.get_pixel(bp.x, bp.y).clone();
-                    //     let apx = img.get_pixel(ap.x, ap.y).clone();
+                    let a_rect: Rect = a.into();
+                    let b_rect: Rect = b.into();
+                    let a_img = util::image_at(a_rect, img);
+                    let b_img = util::image_at(b_rect, img);
+                    let a_img = resize(&a_img, b_rect.w, b_rect.h, FilterType::Triangle);
+                    let b_img = resize(&b_img, a_rect.w, a_rect.h, FilterType::Triangle);
 
-                    //     img.put_pixel(bp.x, bp.y, apx);
-                    //     img.put_pixel(ap.x, ap.y, bpx);
-                    // }
+                    let a_scaled = a.resize(b_rect.w, b_rect.h);
+                    let b_scaled = b.resize(a_rect.w, a_rect.h);
+
+                    // TODO: finish this!! hurting head right now
+                    // key takeaway that a_img has pixel data for b dest in target image, and so b_img has pixel data for a dest in target image
+                    for (a, p) in a_scaled.iter_pairwise_projection_onto(b) {
+                        img.put_pixel(p.x, p.y, b.get_pixel())
+                    }
+
+                    for (ap, bp) in a.iter_pairwise_projection_onto(b.clone()) {
+                        let bpx = img.get_pixel(bp.x, bp.y).clone();
+                        let apx = img.get_pixel(ap.x, ap.y).clone();
+
+                        img.put_pixel(bp.x, bp.y, apx);
+                        img.put_pixel(ap.x, ap.y, bpx);
+                    }
                 }
             },
         }

@@ -131,11 +131,8 @@ fn process_frame(
 
         let copy: Operation = Copy::new(mouth.clone().into(), r_eye.into()).into();
         ops.push(copy.into());
-        let copy: Operation = Copy::new(l_eye.into(), mouth.into()).into();
-        ops.push(copy.into());
-        // let swap: Operation = Swap::new(mouth.into(), l_eye.into()).into();
-
-        // ops.push(swap.into());
+        let swap: Operation = Swap::new(mouth.into(), l_eye.into()).into();
+        ops.push(swap.into());
     }
 
     for (idx, op) in ops.iter().enumerate() {

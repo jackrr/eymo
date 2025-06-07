@@ -1,15 +1,10 @@
 use super::{util, Executable};
-use crate::shapes::{
-    polygon::{Polygon, ProjectedPolygonIter},
-    rect::Rect,
-    shape::Shape,
-};
+use crate::shapes::{polygon::ProjectedPolygonIter, rect::Rect, shape::Shape};
 use anyhow::Result;
 use image::{
     imageops::{resize, FilterType},
-    GenericImage, Rgb, RgbImage,
+    GenericImage, RgbImage,
 };
-use log::debug;
 
 #[derive(Debug, Clone)]
 pub struct Copy {
@@ -37,8 +32,9 @@ impl Executable for Copy {
                 Shape::Polygon(dp) => {
                     // TODO: verify this works
                     let sr = Rect::from_tl(0, 0, r_src.width(), r_src.height());
-                    // This is going to be backward... need to invert src/dest from iterator
-                    copy_pixels(r_src, img, dp.iter_pairwise_projection_onto(sr));
+                    let mut iter = dp.iter_pairwise_projection_onto(sr);
+                    iter.invert();
+                    copy_pixels(r_src, img, iter);
                 }
             },
             Shape::Polygon(sp) => match &self.dest {

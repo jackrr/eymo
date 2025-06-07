@@ -1,9 +1,11 @@
 use super::Executable;
 use crate::manipulation::util;
+use crate::shapes::polygon::Polygon;
 use crate::shapes::{rect::Rect, shape::Shape};
 use anyhow::Result;
 use image::imageops::{resize, FilterType};
 use image::{GenericImage, RgbImage};
+use log::debug;
 
 #[derive(Debug, Clone)]
 pub struct Swap {
@@ -36,35 +38,50 @@ impl Executable for Swap {
                     swap_rects(img, (*a).clone(), *b)?;
                 }
                 Shape::Polygon(b) => {
-                    let a_rect: Rect = a.into();
-                    let b_rect: Rect = b.into();
-                    let a_img = util::image_at(a_rect, img);
-                    let b_img = util::image_at(b_rect, img);
+                    let a_rect = Rect::from(a.clone());
+                    let b_rect = Rect::from(b.clone());
+                    let a_img = util::image_at(a_rect, img)?;
+                    let b_img = util::image_at(b_rect, img)?;
                     let a_img = resize(&a_img, b_rect.w, b_rect.h, FilterType::Triangle);
                     let b_img = resize(&b_img, a_rect.w, a_rect.h, FilterType::Triangle);
 
-                    let a_scaled = a.resize(b_rect.w, b_rect.h);
-                    let b_scaled = b.resize(a_rect.w, a_rect.h);
+                    let a_scaled = a.project(Rect::from_tl(0, 0, a_img.width(), a_img.height()));
+                    let b_scaled = b.project(Rect::from_tl(0, 0, b_img.width(), b_img.height()));
 
-                    // TODO: finish this!! hurting head right now
-                    // key takeaway that a_img has pixel data for b dest in target image, and so b_img has pixel data for a dest in target image
-                    for (a, p) in a_scaled.iter_pairwise_projection_onto(b) {
-                        img.put_pixel(p.x, p.y, b.get_pixel())
-                    }
-
-                    for (ap, bp) in a.iter_pairwise_projection_onto(b.clone()) {
-                        let bpx = img.get_pixel(bp.x, bp.y).clone();
-                        let apx = img.get_pixel(ap.x, ap.y).clone();
-
-                        img.put_pixel(bp.x, bp.y, apx);
-                        img.put_pixel(ap.x, ap.y, bpx);
-                    }
+                    copy_from(a, b_scaled, &b_img, img)?;
+                    copy_from(b, a_scaled, &a_img, img)?;
                 }
             },
         }
 
         Ok(())
     }
+}
+
+fn copy_from(
+    dest_p: &Polygon,
+    src_r: Polygon,
+    src_img: &RgbImage,
+    dest_img: &mut RgbImage,
+) -> Result<()> {
+    for (p, src_p) in dest_p.iter_pairwise_projection_onto(src_r) {
+        if src_p.x >= src_img.width()
+            || src_p.y >= src_img.height()
+            || p.x >= dest_img.width()
+            || p.y >= dest_img.height()
+        {
+            debug!(
+                "Out of bounds pixel swap{p:?} {src_p:?} img: {}x{} src_img: {}x{}",
+                dest_img.width(),
+                dest_img.height(),
+                src_img.width(),
+                src_img.height(),
+            );
+            continue;
+        }
+        dest_img.put_pixel(p.x, p.y, *src_img.get_pixel(src_p.x, src_p.y));
+    }
+    Ok(())
 }
 
 fn swap_rects(

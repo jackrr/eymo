@@ -40,7 +40,7 @@ impl Face {
     pub fn rot_theta(&self) -> f32 {
         let dx = self.r_eye.x - self.l_eye.x;
         let dy = self.r_eye.y - self.l_eye.y;
-        dy.atan2(dx)
+        -dy.atan2(dx)
     }
 }
 

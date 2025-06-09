@@ -4,6 +4,7 @@ use anyhow::{Error, Result};
 use clap::Parser;
 use image::{ImageReader, RgbImage};
 use log::{debug, info, warn};
+use manipulation::Rotate;
 use num_cpus::get as get_cpu_count;
 use pipeline::Detection;
 use std::sync::{Arc, Mutex, RwLock};
@@ -131,8 +132,10 @@ fn process_frame(
 
         let copy: Operation = Copy::new(mouth.clone().into(), r_eye.into()).into();
         ops.push(copy.into());
-        let swap: Operation = Swap::new(mouth.into(), l_eye.into()).into();
+        let swap: Operation = Swap::new(mouth.clone().into(), l_eye.into()).into();
         ops.push(swap.into());
+        let rotate: Operation = Rotate::new(mouth.into(), 45.).into();
+        ops.push(rotate.into());
     }
 
     for (idx, op) in ops.iter().enumerate() {

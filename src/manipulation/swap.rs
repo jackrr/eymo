@@ -48,40 +48,14 @@ impl Executable for Swap {
                     let a_scaled = a.project(Rect::from_tl(0, 0, a_img.width(), a_img.height()));
                     let b_scaled = b.project(Rect::from_tl(0, 0, b_img.width(), b_img.height()));
 
-                    copy_from(a, b_scaled, &b_img, img)?;
-                    copy_from(b, a_scaled, &a_img, img)?;
+                    util::copy_from(b_scaled, &b_img, a, img)?;
+                    util::copy_from(a_scaled, &a_img, b, img)?;
                 }
             },
         }
 
         Ok(())
     }
-}
-
-fn copy_from(
-    dest_p: &Polygon,
-    src_r: Polygon,
-    src_img: &RgbImage,
-    dest_img: &mut RgbImage,
-) -> Result<()> {
-    for (p, src_p) in dest_p.iter_pairwise_projection_onto(src_r) {
-        if src_p.x >= src_img.width()
-            || src_p.y >= src_img.height()
-            || p.x >= dest_img.width()
-            || p.y >= dest_img.height()
-        {
-            debug!(
-                "Out of bounds pixel swap{p:?} {src_p:?} img: {}x{} src_img: {}x{}",
-                dest_img.width(),
-                dest_img.height(),
-                src_img.width(),
-                src_img.height(),
-            );
-            continue;
-        }
-        dest_img.put_pixel(p.x, p.y, *src_img.get_pixel(src_p.x, src_p.y));
-    }
-    Ok(())
 }
 
 fn swap_rects(

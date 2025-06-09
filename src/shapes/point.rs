@@ -33,15 +33,15 @@ impl Point {
     }
 
     pub fn rotate(&mut self, origin: Point, theta: f32) -> Point {
-        // TODO: woof these typecasts are ugly... i32 as input? safer casts to/from f32?
-        let x = (self.x as i32 - origin.x as i32) as f32;
-        let y = (self.y as i32 - origin.y as i32) as f32;
+        let theta = -1. * theta;
+        let x: f32 = (self.x as i32 - origin.x as i32) as f32;
+        let y: f32 = (self.y as i32 - origin.y as i32) as f32;
 
         let rot_x = x * theta.cos() - y * theta.sin();
         let rot_y = x * theta.sin() + y * theta.cos();
 
-        self.x = (rot_x.round() as i32 + origin.x as i32) as u32;
-        self.y = (rot_y.round() as i32 + origin.y as i32) as u32;
+        self.x = coerce_u32(rot_x + origin.x as f32);
+        self.y = coerce_u32(rot_y + origin.y as f32);
 
         *self
     }
@@ -57,8 +57,65 @@ impl Point {
     }
 }
 
+fn coerce_u32(n: f32) -> u32 {
+    if n < 0. {
+        0
+    } else {
+        n.round() as u32
+    }
+}
+
 impl Pointi32 {
     pub fn new(x: i32, y: i32) -> Self {
         Self { x, y }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rotate() {
+        let origin = Point::new(1, 1);
+        let mut p = Point::new(2, 2);
+        let clock90 = 90_f32.to_radians();
+        let counter90 = (-90_f32).to_radians();
+
+        assert_eq!(p.clone().rotate(origin, clock90), Point::new(2, 0));
+        assert_eq!(p.rotate(origin, counter90), Point::new(0, 2));
+    }
+
+    #[test]
+    fn test_project_center() {
+        let p = Point::new(1, 1);
+        let src = Rect::from_tl(0, 0, 2, 2);
+        let dest = Rect::from_tl(0, 0, 4, 4);
+
+        assert_eq!(p.project(&src, &dest), Point::new(2, 2));
+    }
+
+    #[test]
+    fn test_project_corners() {
+        let tl = Point::new(0, 0);
+        let br = Point::new(2, 2);
+
+        let src = Rect::from_tl(0, 0, 2, 2);
+        let dest = Rect::from_tl(0, 0, 4, 4);
+
+        assert_eq!(tl.project(&src, &dest), Point::new(0, 0));
+        assert_eq!(br.project(&src, &dest), Point::new(4, 4));
+    }
+
+    #[test]
+    fn test_project_inner() {
+        let tl = Point::new(1, 1);
+        let br = Point::new(3, 3);
+
+        let src = Rect::from_tl(0, 0, 4, 4);
+        let dest = Rect::from_tl(0, 0, 8, 8);
+
+        assert_eq!(tl.project(&src, &dest), Point::new(2, 2));
+        assert_eq!(br.project(&src, &dest), Point::new(6, 6));
     }
 }

@@ -35,8 +35,45 @@ impl Polygon {
         Self::new(points)
     }
 
+    pub fn center(&self) -> Point {
+        let left = self.min_x();
+        let right = self.max_x();
+        let top = self.min_y();
+        let bottom = self.max_y();
+        Point::new(
+            left + ((right - left) as f32 / 2.).round() as u32,
+            top + ((bottom - top) as f32 / 2.).round() as u32,
+        )
+    }
+
+    pub fn rotate(&self, theta: f32) -> Self {
+        let center = self.center();
+        Self::new(
+            self.points
+                .iter()
+                .map(|p| p.clone().rotate(center, theta))
+                .collect(),
+        )
+    }
+
+    pub fn min_x(&self) -> u32 {
+        self.points.iter().map(|p| p.x).fold(u32::MAX, u32::min)
+    }
+
+    pub fn max_x(&self) -> u32 {
+        self.points.iter().map(|p| p.x).fold(0, u32::max)
+    }
+
+    pub fn min_y(&self) -> u32 {
+        self.points.iter().map(|p| p.y).fold(u32::MAX, u32::min)
+    }
+
+    pub fn max_y(&self) -> u32 {
+        self.points.iter().map(|p| p.y).fold(0, u32::max)
+    }
+
     // FYI contains_point (and underlying fns provided by Claude4.0)
-    fn contains_point(&self, point: Point) -> bool {
+    pub fn contains_point(&self, point: Point) -> bool {
         let point: Pointi32 = point.into();
         let n = self.points_i32.len();
         if n < 3 {
@@ -190,10 +227,9 @@ impl PolygonInteriorIter {
     fn new(polygon: Polygon) -> Self {
         let points = polygon.points.clone();
         Self {
-            min_x: points.iter().map(|p| p.x).fold(u32::MAX, u32::min),
-            max_x: points.iter().map(|p| p.x).fold(0, u32::max),
-            // min_y: points.iter().map(|p| p.y).fold(u32::MAX, u32::min),
-            max_y: points.iter().map(|p| p.y).fold(0, u32::max),
+            min_x: polygon.min_x(),
+            max_x: polygon.max_x(),
+            max_y: polygon.max_y(),
             polygon,
             last: None,
             started: false,
@@ -415,6 +451,22 @@ mod tests {
 
         assert_eq!(actual.len(), expected.len());
         for (actual, expected) in zip(actual, expected) {
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn test_rotate() {
+        let polygon = Polygon::new(Vec::from([
+            Point::new(0, 0),
+            Point::new(2, 2),
+            Point::new(2, 0),
+        ]));
+
+        let actual = polygon.rotate(90_f32.to_radians());
+        let expected = [Point::new(0, 2), Point::new(2, 0), Point::new(0, 0)];
+
+        for (actual, expected) in zip(actual.points.iter(), expected.iter()) {
             assert_eq!(actual, expected);
         }
     }

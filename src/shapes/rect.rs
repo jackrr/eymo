@@ -1,7 +1,5 @@
-use log::warn;
-use std::panic;
-
 use super::point::{Point, PointF32};
+use super::polygon::Polygon;
 
 // TODO: make rect generic to u32 or f32
 #[derive(Debug, Copy, Clone)]
@@ -88,6 +86,17 @@ impl Into<image::math::Rect> for Rect {
 impl Into<imageproc::rect::Rect> for Rect {
     fn into(self) -> imageproc::rect::Rect {
         imageproc::rect::Rect::at(self.left() as i32, self.top() as i32).of_size(self.w, self.h)
+    }
+}
+
+impl From<Rect> for Polygon {
+    fn from(r: Rect) -> Polygon {
+        Polygon::new(Vec::from([
+            Point::new(r.left(), r.top()),
+            Point::new(r.right(), r.top()),
+            Point::new(r.right(), r.bottom()),
+            Point::new(r.left(), r.bottom()),
+        ]))
     }
 }
 

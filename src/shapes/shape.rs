@@ -16,6 +16,15 @@ impl From<Shape> for Rect {
     }
 }
 
+impl From<Shape> for Polygon {
+    fn from(s: Shape) -> Polygon {
+        match s {
+            Shape::Rect(s) => s.into(),
+            Shape::Polygon(s) => s,
+        }
+    }
+}
+
 impl From<Rect> for Shape {
     fn from(r: Rect) -> Shape {
         Shape::Rect(r)

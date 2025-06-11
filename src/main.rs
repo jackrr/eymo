@@ -4,14 +4,13 @@ use anyhow::{Error, Result};
 use clap::Parser;
 use image::{ImageReader, RgbImage};
 use log::{debug, info, warn};
-use manipulation::Rotate;
 use num_cpus::get as get_cpu_count;
 use pipeline::Detection;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::manipulation::{Copy, Executable, Operation, OperationTree, Swap, Tile};
+use crate::manipulation::{Copy, Executable, Operation, OperationTree, Rotate, Scale, Swap, Tile};
 use crate::pipeline::Pipeline;
 use crate::video::process_frames;
 mod manipulation;
@@ -40,6 +39,7 @@ fn main() -> Result<()> {
     let total_threads = args.max_threads.unwrap_or(total_threads).min(total_threads);
     let pipeline = Pipeline::new(total_threads / 2)?;
 
+    // TODO: https://docs.rs/tracing/latest/tracing/
     match args.image_path {
         Some(p) => {
             let mut img = ImageReader::open(&p)?.decode()?.into_rgb8();
@@ -130,12 +130,14 @@ fn process_frame(
         let l_eye = face.l_eye;
         let r_eye = face.r_eye;
 
-        let copy: Operation = Copy::new(mouth.clone().into(), r_eye.into()).into();
-        ops.push(copy.into());
-        let swap: Operation = Swap::new(mouth.clone().into(), l_eye.into()).into();
-        ops.push(swap.into());
-        let rotate: Operation = Rotate::new(mouth.into(), 45.).into();
-        ops.push(rotate.into());
+        // let copy: Operation = Copy::new(mouth.clone().into(), r_eye.into()).into();
+        // ops.push(copy.into());
+        let scale: Operation = Scale::new(mouth.clone().into(), 3.).into();
+        ops.push(scale.into());
+        // let swap: Operation = Swap::new(mouth.clone().into(), l_eye.into()).into();
+        // ops.push(swap.into());
+        // let rotate: Operation = Rotate::new(mouth.into(), 45.).into();
+        // ops.push(rotate.into());
     }
 
     for (idx, op) in ops.iter().enumerate() {

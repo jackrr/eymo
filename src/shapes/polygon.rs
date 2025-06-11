@@ -16,9 +16,9 @@ impl Polygon {
         Self { points, points_i32 }
     }
 
-    pub fn resize(&self, width: u32, height: u32) -> Self {
+    pub fn scale(&self, scale: f32, max_x: u32, max_y: u32) -> Self {
         let mut bound: Rect = self.clone().into();
-        self.project(bound.resize(width, height))
+        self.project(bound.scale(scale, max_x, max_y))
     }
 
     pub fn project(&self, project: impl Into<Shape>) -> Self {
@@ -189,6 +189,12 @@ pub struct ProjectedPolygonIter {
 }
 
 impl ProjectedPolygonIter {
+    // TODO: implement a likely faster algo; roughly:
+    // 1. get all line segments between adjacent vertices
+    // 2. For each "row" Y between min y and max y of poly:
+    //    3. Sort line segments by intersections with Y
+    //    4. Scan X vals from min x to max x, only giving back points in interior
+
     // Pairwise iteration of a projection and the original
     // Use larger as base iterator to prevent sparsity
     fn new(a: Polygon, b: impl Into<Shape>) -> Self {

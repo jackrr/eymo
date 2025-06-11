@@ -33,7 +33,7 @@ impl Executable for Rotate {
             src_img.width() - 1,
             src_img.height() - 1,
         ));
-        let mut updated = Vec::new();
+
         for p in poly_src.iter_inner_points() {
             let mut rot_p = p.clone();
             rot_p.x += trans_x;
@@ -48,7 +48,6 @@ impl Executable for Rotate {
                 warn!("Skipping {p:?} -> {rot_p:?}");
                 continue;
             }
-            updated.push(rot_p);
 
             img.put_pixel(rot_p.x, rot_p.y, *src_img.get_pixel(p.x, p.y));
         }

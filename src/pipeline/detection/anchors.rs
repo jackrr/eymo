@@ -1,6 +1,6 @@
 use crate::shapes::rect::RectF32;
 use anyhow::{Error, Result};
-use log::debug;
+use tracing::debug;
 
 const MIN_SCALE: f32 = 0.1484375;
 const MAX_SCALE: f32 = 0.75;

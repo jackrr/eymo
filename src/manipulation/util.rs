@@ -2,7 +2,7 @@ use crate::shapes::polygon::Polygon;
 use crate::shapes::rect::Rect;
 use anyhow::Result;
 use image::{GenericImage, GenericImageView, RgbImage};
-use log::debug;
+use tracing::debug;
 
 pub fn image_at(bounds: Rect, src: &RgbImage) -> Result<RgbImage> {
     let view = *src.view(

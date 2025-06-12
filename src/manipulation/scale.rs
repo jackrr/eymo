@@ -2,7 +2,7 @@ use super::{util, Executable};
 use crate::shapes::{rect::Rect, shape::Shape};
 use anyhow::{Error, Result};
 use image::{imageops::resize, imageops::FilterType, GenericImage, RgbImage};
-use log::{debug, warn};
+use tracing::warn;
 
 #[derive(Debug, Clone)]
 pub struct Scale {

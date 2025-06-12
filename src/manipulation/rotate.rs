@@ -2,7 +2,7 @@ use super::{util, Executable};
 use crate::shapes::{polygon::Polygon, rect::Rect, shape::Shape};
 use anyhow::Result;
 use image::RgbImage;
-use log::warn;
+use tracing::warn;
 
 #[derive(Debug, Clone)]
 pub struct Rotate {

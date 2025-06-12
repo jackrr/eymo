@@ -5,9 +5,9 @@ use anchors::gen_anchors;
 use anyhow::Result;
 use image::imageops::{resize, FilterType};
 use image::RgbImage;
-use log::debug;
 use ndarray::Array;
 use ort::value::Tensor;
+use tracing::{debug, span, Level};
 
 mod anchors;
 
@@ -72,8 +72,18 @@ impl FaceDetector {
     }
 
     pub fn run(&self, img: &RgbImage) -> Result<Vec<Face>> {
-        let resized = resize(img, WIDTH, HEIGHT, FilterType::Nearest);
+        let span = span!(Level::INFO, "face_detector");
+        let _guard = span.enter();
 
+        // resize -- approx 60ms
+        let span_res = span!(Level::INFO, "face_detector_resize");
+        let res_span_guard = span_res.enter();
+        let resized = resize(img, WIDTH, HEIGHT, FilterType::Nearest);
+        drop(res_span_guard);
+
+        // ndarr -- approx 7ms
+        let span_ndarr = span!(Level::INFO, "face_detector_ndarr");
+        let ndarr_span_guard = span_ndarr.enter();
         let resized_width = resized.width();
         let resized_height = resized.height();
 
@@ -90,11 +100,24 @@ impl FaceDetector {
                     (resized.get_pixel(x, y)[c] as f32 / 127.5) - 1. // -1.0 - 1.0 range
                 }
             });
+        drop(ndarr_span_guard);
 
+        // tensor -- approx 23micros
+        let span_tensor = span!(Level::INFO, "face_detector_tensor");
+        let tensor_span_guard = span_tensor.enter();
         let input = Tensor::from_array(input_arr)?;
+        drop(tensor_span_guard);
+
+        // model -- 2-20ms (either 2ms or like 18-20ms... why?)
+        let span_model = span!(Level::INFO, "face_detector_model");
+        let model_span_guard = span_model.enter();
         let outputs = self.model.run(ort::inputs!["input" => input]?)?;
         let regressors = outputs["regressors"].try_extract_tensor::<f32>()?;
         let classificators = outputs["classificators"].try_extract_tensor::<f32>()?;
+        drop(model_span_guard);
+
+        let span_result = span!(Level::INFO, "face_detector_results");
+        let result_span_guard = span_result.enter();
         let scores = classificators.as_slice().unwrap();
 
         let detections = regressors.squeeze();
@@ -143,6 +166,8 @@ impl FaceDetector {
             }
             row_idx += 1;
         }
+
+        drop(result_span_guard);
 
         debug!("Detected {} faces", results.len());
 

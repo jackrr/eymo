@@ -1,5 +1,4 @@
 use super::point::{Point, Pointi32};
-use log::debug;
 
 use super::rect::Rect;
 use super::shape::Shape;
@@ -231,7 +230,6 @@ impl Iterator for ProjectedPolygonIter {
 
 impl PolygonInteriorIter {
     fn new(polygon: Polygon) -> Self {
-        let points = polygon.points.clone();
         Self {
             min_x: polygon.min_x(),
             max_x: polygon.max_x(),

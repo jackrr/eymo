@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 use anyhow::Result;
 use image::{Rgb, RgbImage};
 
@@ -7,7 +5,7 @@ use crate::shapes::polygon::Polygon;
 use detection::FaceDetector;
 use imageproc::drawing;
 use landmarks::FaceLandmarker;
-use log::{debug, info};
+use tracing::{debug, info, span, trace, Level};
 
 mod detection;
 mod landmarks;
@@ -40,17 +38,18 @@ impl Pipeline {
     }
 
     pub fn run(&self, img: &RgbImage) -> Result<Detection> {
-        let start = Instant::now();
-        let face_bounds = self.face_detector.run(img)?;
-        info!("Detector took {}ms", start.elapsed().as_millis());
-        let mut faces = Vec::new();
+        let span = span!(Level::INFO, "pipeline");
+        let _guard = span.enter();
 
+        let face_bounds = self.face_detector.run(img)?;
+
+        let mut faces = Vec::new();
         for face_bound in face_bounds {
-            debug!("Face bound: {face_bound:?}");
-            let start = Instant::now();
+            trace!("Face bound: {face_bound:?}");
+
             let face = self.face_landmarker.run(img, &face_bound)?;
-            info!("Landmarker took {}ms", start.elapsed().as_millis());
-            debug!("Face features: {face:?}");
+            info!("Landmarker done");
+            trace!("Face features: {face:?}");
 
             faces.push(face);
         }
@@ -63,9 +62,9 @@ impl Pipeline {
         let mut faces = Vec::new();
 
         for face_bound in face_bounds {
-            debug!("Face bound: {face_bound:?}");
+            trace!("Face bound: {face_bound:?}");
             let face = self.face_landmarker.run(img, &face_bound)?;
-            debug!("Face features: {face:?}");
+            trace!("Face features: {face:?}");
             faces.push(face);
             drawing::draw_hollow_rect_mut(img, face_bound.bounds.into(), Rgb([255u8, 0u8, 0u8]));
             drawing::draw_filled_circle_mut(

@@ -1,10 +1,10 @@
 use crate::pipeline::Detection;
 use anyhow::Result;
 use image::{EncodableLayout, RgbImage};
-use log::{debug, error, warn};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
+use tracing::{debug, error, warn};
 
 use std::io::Write;
 use std::process::{Command, Stdio};

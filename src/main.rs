@@ -3,12 +3,14 @@
 use anyhow::{Error, Result};
 use clap::Parser;
 use image::{ImageReader, RgbImage};
-use log::{debug, info, warn};
 use num_cpus::get as get_cpu_count;
 use pipeline::Detection;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
+use tracing::{debug, info, span, warn, Level};
+use tracing_subscriber::fmt;
+use tracing_subscriber::fmt::format::FmtSpan;
 
 use crate::manipulation::{Copy, Executable, Operation, OperationTree, Rotate, Scale, Swap, Tile};
 use crate::pipeline::Pipeline;
@@ -32,7 +34,12 @@ struct Args {
 }
 
 fn main() -> Result<()> {
-    env_logger::init();
+    fmt::fmt()
+        .with_span_events(FmtSpan::CLOSE)
+        .with_target(false)
+        .with_level(false)
+        .init();
+
     let args = Args::parse();
 
     let total_threads = get_cpu_count();
@@ -110,6 +117,8 @@ fn process_frame(
     img: &mut RgbImage,
     detection: Arc<RwLock<Option<Detection>>>,
 ) -> Result<()> {
+    let span = span!(Level::INFO, "process_frame");
+    let _guard = span.enter();
     let start = Instant::now();
     let face_detection_lock = detection.read().unwrap();
 
@@ -129,6 +138,7 @@ fn process_frame(
         let mouth = face.mouth;
         let l_eye = face.l_eye;
         let r_eye = face.r_eye;
+        let nose = face.nose;
 
         // let copy: Operation = Copy::new(mouth.clone().into(), r_eye.into()).into();
         // ops.push(copy.into());

@@ -7,9 +7,9 @@ use anyhow::Result;
 use image::imageops::{resize, FilterType};
 use image::{GenericImage, GenericImageView, Rgb, RgbImage};
 use imageproc::geometric_transformations::{rotate_about_center, Interpolation};
-use log::debug;
 use ndarray::Array;
 use ort::value::Tensor;
+use tracing::{debug, span, Level};
 
 pub struct FaceLandmarker {
     model: Session,
@@ -41,6 +41,9 @@ impl FaceLandmarker {
     }
 
     pub fn run(&self, img: &RgbImage, face: &detection::Face) -> Result<Face> {
+        let span = span!(Level::INFO, "face_landmarker");
+        let _guard = span.enter();
+
         let mut bounds = face.bounds.clone();
         // pad 25% on each side
         bounds.scale(1.5, img.width(), img.height());

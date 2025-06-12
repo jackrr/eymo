@@ -1,11 +1,9 @@
 use super::Executable;
 use crate::manipulation::util;
-use crate::shapes::polygon::Polygon;
 use crate::shapes::{rect::Rect, shape::Shape};
 use anyhow::Result;
 use image::imageops::{resize, FilterType};
 use image::{GenericImage, RgbImage};
-use log::debug;
 
 #[derive(Debug, Clone)]
 pub struct Swap {

@@ -15,6 +15,7 @@ use tracing_subscriber::fmt::format::FmtSpan;
 use crate::manipulation::{Copy, Executable, Operation, OperationTree, Rotate, Scale, Swap, Tile};
 use crate::pipeline::Pipeline;
 use crate::video::process_frames;
+mod imggpu;
 mod manipulation;
 mod pipeline;
 mod shapes;

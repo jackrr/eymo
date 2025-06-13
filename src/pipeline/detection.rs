@@ -1,9 +1,9 @@
 use super::model::{initialize_model, Session};
+use crate::imggpu::resize::{resize, ResizeAlgo};
 use crate::shapes::point::PointF32;
 use crate::shapes::rect::{Rect, RectF32};
 use anchors::gen_anchors;
 use anyhow::Result;
-use image::imageops::{resize, FilterType};
 use image::RgbImage;
 use ndarray::Array;
 use ort::value::Tensor;
@@ -78,7 +78,7 @@ impl FaceDetector {
         // resize -- approx 60ms
         let span_res = span!(Level::INFO, "face_detector_resize");
         let res_span_guard = span_res.enter();
-        let resized = resize(img, WIDTH, HEIGHT, FilterType::Nearest);
+        let resized = resize(img, WIDTH, HEIGHT, ResizeAlgo::Nearest);
         drop(res_span_guard);
 
         // ndarr -- approx 7ms

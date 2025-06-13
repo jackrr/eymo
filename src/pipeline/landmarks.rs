@@ -40,10 +40,14 @@ impl FaceLandmarker {
         })
     }
 
+    // ~80-90ms
     pub fn run(&self, img: &RgbImage, face: &detection::Face) -> Result<Face> {
         let span = span!(Level::INFO, "face_landmarker");
         let _guard = span.enter();
 
+        // ~25-60ms
+        let span_rotate = span!(Level::INFO, "face_landmarker_rotate");
+        let rotate_guard = span_rotate.enter();
         let mut bounds = face.bounds.clone();
         // pad 25% on each side
         bounds.scale(1.5, img.width(), img.height());
@@ -59,8 +63,17 @@ impl FaceLandmarker {
             Interpolation::Nearest,
             Rgb([0u8, 0u8, 0u8]),
         );
+        drop(rotate_guard);
 
+        // ~33-50ms
+        let span_resize = span!(Level::INFO, "face_landmarker_resize");
+        let resize_guard = span_resize.enter();
         let input_img = resize(&face_img, WIDTH, HEIGHT, FilterType::Nearest);
+        drop(resize_guard);
+
+        // ~18ms
+        let span_tensor = span!(Level::INFO, "face_landmarker_tensor");
+        let tensor_guard = span_tensor.enter();
         let input_img_height = input_img.height();
         let input_img_width = input_img.width();
 
@@ -79,10 +92,20 @@ impl FaceLandmarker {
             });
 
         let input = Tensor::from_array(input_arr)?;
+        drop(tensor_guard);
+
+        // ~3-10ms
+        let span_inference = span!(Level::INFO, "face_landmarker_inference");
+        let inference_guard = span_inference.enter();
         let outputs = self.model.run(ort::inputs!["input_1" => input]?)?;
 
         let output = outputs["conv2d_21"].try_extract_tensor::<f32>()?;
         let mesh = output.squeeze().squeeze().squeeze();
+        drop(inference_guard);
+
+        // ~20micros
+        let span_results = span!(Level::INFO, "face_landmarker_results");
+        let results_guard = span_results.enter();
 
         let r = mesh.as_slice().unwrap();
 
@@ -92,8 +115,7 @@ impl FaceLandmarker {
         let y_offset = bounds.top() as f32;
         let origin = bounds.center();
         let rotation = face.rot_theta();
-
-        Ok(Face {
+        let result = Face {
             mouth: extract_feature(
                 &r,
                 &MOUTH_IDXS,
@@ -127,7 +149,11 @@ impl FaceLandmarker {
             nose: extract_feature(
                 &r, &NOSE_IDXS, x_offset, y_offset, x_scale, y_scale, &origin, rotation,
             ),
-        })
+        };
+
+        drop(results_guard);
+
+        Ok(result)
     }
 }
 

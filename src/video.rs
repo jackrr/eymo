@@ -21,7 +21,7 @@ use nokhwa::{
 
 // TODO: make these configurable
 const TARGET_FPS: u32 = 30;
-const MAX_LAG_MS: u128 = 250;
+const MAX_LAG_MS: u128 = 500;
 
 pub fn process_frames(
     max_threads: usize,

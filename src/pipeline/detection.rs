@@ -78,7 +78,7 @@ impl FaceDetector {
         // resize -- approx 60ms
         let span_res = span!(Level::INFO, "face_detector_resize");
         let res_span_guard = span_res.enter();
-        let resized = resize(img, WIDTH, HEIGHT, ResizeAlgo::Nearest);
+        let resized = resize(img, WIDTH, HEIGHT, ResizeAlgo::Nearest)?;
         drop(res_span_guard);
 
         // ndarr -- approx 7ms

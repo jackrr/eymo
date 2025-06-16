@@ -26,7 +26,7 @@ impl Executable for Scale {
             (src_img.width() as f32 * zoom).round() as u32,
             (src_img.height() as f32 * zoom).round() as u32,
             ResizeAlgo::Linear,
-        );
+        )?;
 
         match &self.target {
             Shape::Polygon(poly) => {

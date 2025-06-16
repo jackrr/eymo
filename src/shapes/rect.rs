@@ -172,8 +172,10 @@ impl Rect {
         }
     }
 
-    pub fn from_center(xc: u32, yc: u32, w: u32, h: u32) -> Rect {
-        Rect { x: xc, y: yc, w, h }
+    pub fn from_center(xc: u32, yc: u32, w: u32, h: u32) -> Self {
+        let left: u32 = (xc as i32 - w as i32 / 2).max(0) as u32;
+        let top: u32 = (yc as i32 - h as i32 / 2).max(0) as u32;
+        Self::from_tl(left, top, w, h)
     }
 
     pub fn overlap_pct(&self, other: &Rect) -> f32 {

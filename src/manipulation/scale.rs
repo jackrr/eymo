@@ -1,7 +1,8 @@
 use super::{util, Executable};
+use crate::imggpu::resize::{resize, ResizeAlgo};
 use crate::shapes::{rect::Rect, shape::Shape};
-use anyhow::{Error, Result};
-use image::{imageops::resize, imageops::FilterType, GenericImage, RgbImage};
+use anyhow::Result;
+use image::{GenericImage, RgbImage};
 use tracing::warn;
 
 #[derive(Debug, Clone)]
@@ -24,7 +25,7 @@ impl Executable for Scale {
             &src_img,
             (src_img.width() as f32 * zoom).round() as u32,
             (src_img.height() as f32 * zoom).round() as u32,
-            FilterType::Triangle,
+            ResizeAlgo::Linear,
         );
 
         match &self.target {

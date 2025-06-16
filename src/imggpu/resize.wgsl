@@ -6,8 +6,10 @@
 @group(0) @binding(2) var<uniform> width : u32;
 @group(0) @binding(3) var<uniform> height : u32;
 
+fn float_color(c : u32) -> f32 { return f32(c) / 255.0; }
+
 // To get 3 bytes starting at byte index `byte_index`:
-fn get_3_bytes(byte_index : u32) -> vec3<u32> {
+fn get_rgb(byte_index : u32) -> vec3<u32> {
   let word_index = byte_index / 4u;
   let byte_offset = byte_index % 4u;
 
@@ -39,11 +41,13 @@ fn get_3_bytes(byte_index : u32) -> vec3<u32> {
 }
 
 fn get_rgba(coords : vec2<u32>) -> vec4<f32> {
-  let byte_offset = coords.y * height * width + coords.x * width;
-  let rgb = get_3_bytes(byte_offset);
-  return vec4<f32>(f32(rgb.x), f32(rgb.y), f32(rgb.z), 1.0);
+  let array_offset = coords.y * width + coords.x;
+  let rgb = get_rgb(array_offset * 3);
+  return vec4<f32>(float_color(rgb.x), float_color(rgb.y), float_color(rgb.z),
+                   1.0);
 }
 
+// TODO: convert this to work with input buffer
 // Manual bilinear interpolation for compute shaders
 fn bilinear_sample(tex : texture_2d<f32>, uv : vec2<f32>) -> vec4<f32> {
   let tex_size = vec2<f32>(textureDimensions(tex));

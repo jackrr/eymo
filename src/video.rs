@@ -1,3 +1,4 @@
+use crate::imggpu::resize::GpuExecutor;
 use crate::pipeline::Detection;
 use anyhow::Result;
 use image::{EncodableLayout, RgbImage};
@@ -45,6 +46,13 @@ pub fn process_frames(
     let s = Arc::clone(&sender);
     let input_frame_idx = Arc::clone(&input_frame_idx);
 
+    let num_gpus = 4;
+    let (push_gpu, pull_gpu) = flume::bounded(num_gpus);
+    let (push_gpu, pull_gpu) = (Arc::new(push_gpu), Arc::new(pull_gpu));
+    for _ in 0..num_gpus {
+        push_gpu.send(GpuExecutor::new()?)?;
+    }
+
     let mut camera = CallbackCamera::new(
         cameras.last().unwrap().index().clone(),
         RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate),
@@ -60,6 +68,8 @@ pub fn process_frames(
 
             let latest_frame = Arc::clone(&latest_frame);
             let detection = Arc::clone(&detection);
+            let pull_gpu = Arc::clone(&pull_gpu);
+            let push_gpu = Arc::clone(&push_gpu);
 
             let join = thread::spawn(move || -> (u32, RgbImage) {
                 let mut image = buffer.decode_image::<RgbFormat>().unwrap();
@@ -68,14 +78,23 @@ pub fn process_frames(
                 *latest_frame = Some(image.clone());
                 drop(latest_frame);
 
+                let gpu = match pull_gpu.recv() {
+                    Ok(gpu) => gpu,
+                    Err(err) => {
+                        error!("Failed to pull GpuExecutor off channel: {:?}", err);
+                        return (frame_idx, image);
+                    }
+                };
                 match process_frame(
                     MAX_LAG_MS.saturating_sub(rec_at.elapsed().as_millis()) as u32,
                     &mut image,
                     detection,
+                    &gpu,
                 ) {
                     Ok(_) => {}
                     Err(err) => warn!("Could not complete processing frame {}: {}", frame_idx, err),
                 }
+                push_gpu.send(gpu);
 
                 let total_ms = rec_at.elapsed().as_millis();
                 debug!("Finished processing frame {frame_idx} in {total_ms}ms");

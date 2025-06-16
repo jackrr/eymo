@@ -19,13 +19,25 @@ impl ResizeAlgo {
     }
 }
 
-struct GpuExecutor {
+pub fn resize(img: &RgbImage, width: u32, height: u32, algo: ResizeAlgo) -> Result<RgbImage> {
+    let span = span!(Level::INFO, "resize");
+    let _guard = span.enter();
+    let executor = GpuExecutor::new()?;
+    Ok(Resizer::new(&executor, img.width(), img.height(), width, height, algo).run(&executor, img))
+}
+
+pub fn resize_with_executor(executor: &GpuExecutor, img: &RgbImage, width: u32, height: u32, algo: ResizeAlgo) -> Result<RgbImage> {
+    let span = span!(Level::INFO, "resize_with_executor");
+    let _guard = span.enter();
+    Ok(Resizer::new(&executor, img.width(), img.height(), width, height, algo).run(&executor, img))
+}
+
+pub struct GpuExecutor {
     queue: wgpu::Queue,
     device: wgpu::Device
 }
 
 pub struct Resizer {
-    executor: GpuExecutor,
     pipeline: wgpu::ComputePipeline,
     bind_group: wgpu::BindGroup,
     input_buffer: wgpu::Buffer,
@@ -37,6 +49,50 @@ pub struct Resizer {
     output_height: u32,
 }
 
+pub struct CachedResizer {
+    resizer: Option<Resizer>,
+    gpu: GpuExecutor,
+}
+
+impl CachedResizer {
+    pub fn new() -> Result<Self> {
+        Ok(Self { resizer: None, gpu: GpuExecutor::new()? })
+    }
+
+    fn new_resizer(&mut self, img: &RgbImage, width: u32, height: u32, algo: ResizeAlgo) -> Resizer {
+        Resizer::new(
+            &self.gpu,
+            img.width(),
+            img.height(),
+            width,
+            height,
+            algo
+        )
+    }
+
+    pub fn run(&mut self, img: &RgbImage, width: u32, height: u32, algo: ResizeAlgo) -> RgbImage {
+        match &mut self.resizer {
+            Some(resizer) => {
+                if resizer.input_width != img.width() || resizer.input_height != img.height() {                    // Dimensions changed -- need a new resizer
+                    let mut resizer = self.new_resizer(img, width, height, algo);
+                    let result = resizer.run(&self.gpu, img);
+                    self.resizer = Some(resizer);
+                    result
+                } else {
+                    resizer.run(&self.gpu, img)
+                }
+            }
+            None => {
+                let mut resizer = self.new_resizer(img, width, height, algo);
+                let result = resizer.run(&self.gpu, img);
+                self.resizer = Some(resizer);
+                result
+            }
+        }
+        
+    }
+}
+
 fn calc_image_buffer_size(width: u32, height: u32) -> (u32, u32) {
     let input_size = width * height * 3;
     let buffer_alignment = wgpu::COPY_BUFFER_ALIGNMENT as u32;
@@ -46,11 +102,9 @@ fn calc_image_buffer_size(width: u32, height: u32) -> (u32, u32) {
 }
 
 impl Resizer {
-    pub fn new(input_width: u32, input_height: u32, output_width: u32, output_height: u32, algo: ResizeAlgo) -> Result<Self> {
+    pub fn new(executor: &GpuExecutor, input_width: u32, input_height: u32, output_width: u32, output_height: u32, algo: ResizeAlgo) -> Self {
         let span = span!(Level::INFO, "Resizer#new");
         let _guard = span.enter();
-
-        let executor = GpuExecutor::new()?;
 
         let (input_size, input_pad) = calc_image_buffer_size(input_width, input_height);
 
@@ -97,7 +151,7 @@ impl Resizer {
         let output_buffer_size =
             padded_bytes_per_row(output_width) as u64 * output_height as u64 * std::mem::size_of::<u8>() as u64;
         let output_buffer = executor.device.create_buffer(&wgpu::BufferDescriptor {
-            label: None,
+            label: Some("output_buffer"),
             size: output_buffer_size,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
@@ -140,8 +194,7 @@ impl Resizer {
         executor.queue.write_buffer(&width_uniform, 0, &input_width.to_ne_bytes());
         executor.queue.write_buffer(&height_uniform, 0, &input_height.to_ne_bytes());
         
-        Ok(Self {
-            executor,
+        Self {
             pipeline,
             bind_group,
             input_buffer,
@@ -151,20 +204,19 @@ impl Resizer {
             input_height,
             output_width,
             output_height,
-        })
+        }
     }
 
-    pub fn run(&self, img: &RgbImage) -> RgbImage {
-        // TODO: validate image dimensions
+    pub fn run(&mut self, executor: &GpuExecutor, img: &RgbImage) -> RgbImage {
         let span = span!(Level::INFO, "Resizer#run");
         let _guard = span.enter();
 
         let (input_size, _) = calc_image_buffer_size(self.input_width, self.input_height);
-        let mut view = self.executor.queue.write_buffer_with(&self.input_buffer, 0, NonZero::new(self.input_buffer.size()).unwrap()).unwrap();
+        let mut view = executor.queue.write_buffer_with(&self.input_buffer, 0, NonZero::new(self.input_buffer.size()).unwrap()).unwrap();
         view[..input_size as usize].copy_from_slice(img.as_raw());
         drop(view);
         
-        let mut encoder = self.executor.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        let mut encoder = executor.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
 			      label: Some("encoder")
 		    });
 
@@ -203,12 +255,12 @@ impl Resizer {
             self.output_texture.size(),
         );
 
-        self.executor.queue.submit(std::iter::once(encoder.finish()));
+        executor.queue.submit(std::iter::once(encoder.finish()));
 
         let buffer_slice = self.output_buffer.slice(..);
         buffer_slice.map_async(wgpu::MapMode::Read, |r| r.unwrap());
         
-        self.executor.device.poll(wgpu::PollType::Wait).unwrap();
+        executor.device.poll(wgpu::PollType::Wait).unwrap();
 
         let padded_data = buffer_slice.get_mapped_range();
         let mut pixels: Vec<u8> = vec![0; unpadded_bytes_per_row * self.output_height as usize];
@@ -217,17 +269,12 @@ impl Resizer {
             .zip(pixels.chunks_exact_mut(unpadded_bytes_per_row)) {
                 pixels.copy_from_slice(&padded[..unpadded_bytes_per_row]);
             }
+        drop(padded_data);
+        self.output_buffer.unmap();
 
         let with_alpha = RgbaImage::from_raw(self.output_width, self.output_height, pixels).unwrap();
         DynamicImage::ImageRgba8(with_alpha).to_rgb8()
     }
-}
-
-// Goal: 10ms total runtime
-pub fn resize(img: &RgbImage, width: u32, height: u32, algo: ResizeAlgo) -> Result<RgbImage> {
-    let span = span!(Level::INFO, "resize");
-    let _guard = span.enter();
-    Ok(Resizer::new(img.width(), img.height(), width, height, algo)?.run(img))
 }
 
 impl GpuExecutor {
@@ -251,7 +298,7 @@ impl GpuExecutor {
         Ok(Self { device, queue })
     }
 
-    fn new() -> Result<Self> {
+    pub fn new() -> Result<Self> {
         let span = span!(Level::INFO, "GpuExecutor#new");
         let _guard = span.enter();
         Self::init().block_on()

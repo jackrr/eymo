@@ -1,5 +1,5 @@
-use super::{util, Executable};
-use crate::imggpu::resize::{resize, ResizeAlgo};
+use super::{util, GpuExecutable};
+use crate::imggpu::resize::{resize, resize_with_executor, GpuExecutor, ResizeAlgo};
 use crate::shapes::{rect::Rect, shape::Shape};
 use anyhow::Result;
 use image::{GenericImage, RgbImage};
@@ -17,11 +17,12 @@ impl Scale {
     }
 }
 
-impl Executable for Scale {
-    fn execute(&self, img: &mut RgbImage) -> Result<()> {
+impl GpuExecutable for Scale {
+    fn execute(&self, gpu: &GpuExecutor, img: &mut RgbImage) -> Result<()> {
         let zoom = self.zoom;
         let src_img = util::image_at(self.target.clone().into(), img)?;
-        let src_img = resize(
+        let src_img = resize_with_executor(
+            gpu,
             &src_img,
             (src_img.width() as f32 * zoom).round() as u32,
             (src_img.height() as f32 * zoom).round() as u32,

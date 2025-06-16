@@ -3,6 +3,7 @@
 use anyhow::{Error, Result};
 use clap::Parser;
 use image::{ImageReader, RgbImage};
+use imggpu::resize::GpuExecutor;
 use num_cpus::get as get_cpu_count;
 use pipeline::Detection;
 use std::sync::{Arc, Mutex, RwLock};
@@ -12,7 +13,7 @@ use tracing::{debug, info, span, warn, Level};
 use tracing_subscriber::fmt;
 use tracing_subscriber::fmt::format::FmtSpan;
 
-use crate::manipulation::{Copy, Executable, Operation, OperationTree, Rotate, Scale, Swap, Tile};
+use crate::manipulation::{Copy, Operation, OperationTree, Rotate, Scale, Swap, Tile};
 use crate::pipeline::Pipeline;
 use crate::video::process_frames;
 mod imggpu;
@@ -45,7 +46,7 @@ fn main() -> Result<()> {
 
     let total_threads = get_cpu_count();
     let total_threads = args.max_threads.unwrap_or(total_threads).min(total_threads);
-    let pipeline = Pipeline::new(total_threads / 2)?;
+    let mut pipeline = Pipeline::new(total_threads / 2)?;
 
     // TODO: https://docs.rs/tracing/latest/tracing/
     match args.image_path {
@@ -54,8 +55,9 @@ fn main() -> Result<()> {
             let start = Instant::now();
             let result = pipeline.run(&img)?;
             debug!("{result:?}");
+            let gpu = GpuExecutor::new()?;
 
-            process_frame(1000, &mut img, Arc::new(RwLock::new(Some(result))))?;
+            process_frame(1000, &mut img, Arc::new(RwLock::new(Some(result))), &gpu)?;
 
             debug!("Took {:?}", start.elapsed());
 
@@ -117,6 +119,7 @@ fn process_frame(
     within_ms: u32,
     img: &mut RgbImage,
     detection: Arc<RwLock<Option<Detection>>>,
+    gpu: &GpuExecutor,
 ) -> Result<()> {
     let span = span!(Level::INFO, "process_frame");
     let _guard = span.enter();
@@ -155,7 +158,7 @@ fn process_frame(
         // TODO: refactor op list execution to operate "chunkwise",
         // allowing time to be checked here before resuming
         check_time(within_ms, start, &format!("Image Manipulation {idx}"))?;
-        op.execute(img)?;
+        op.execute(gpu, img)?;
     }
 
     Ok(())

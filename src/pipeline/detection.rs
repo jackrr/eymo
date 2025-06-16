@@ -1,5 +1,5 @@
 use super::model::{initialize_model, Session};
-use crate::imggpu::resize::{resize, ResizeAlgo};
+use crate::imggpu::resize::{CachedResizer, GpuExecutor, ResizeAlgo, Resizer};
 use crate::shapes::point::PointF32;
 use crate::shapes::rect::{Rect, RectF32};
 use anchors::gen_anchors;
@@ -17,6 +17,7 @@ const HEIGHT: u32 = 128;
 pub struct FaceDetector {
     model: Session,
     anchors: [RectF32; 896],
+    resizer: CachedResizer,
 }
 
 #[derive(Debug, Clone)]
@@ -68,17 +69,18 @@ impl FaceDetector {
         Ok(FaceDetector {
             model: initialize_model("mediapipe_face_detection_short_range.onnx", threads)?,
             anchors: gen_anchors(),
+            resizer: CachedResizer::new()?,
         })
     }
 
-    pub fn run(&self, img: &RgbImage) -> Result<Vec<Face>> {
+    pub fn run(&mut self, img: &RgbImage) -> Result<Vec<Face>> {
         let span = span!(Level::INFO, "face_detector");
         let _guard = span.enter();
 
-        // resize -- approx 60ms
         let span_res = span!(Level::INFO, "face_detector_resize");
         let res_span_guard = span_res.enter();
-        let resized = resize(img, WIDTH, HEIGHT, ResizeAlgo::Nearest)?;
+        let resized = self.resizer.run(img, WIDTH, HEIGHT, ResizeAlgo::Nearest);
+
         drop(res_span_guard);
 
         // ndarr -- approx 7ms

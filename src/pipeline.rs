@@ -37,7 +37,7 @@ impl Pipeline {
         })
     }
 
-    pub fn run(&self, img: &RgbImage) -> Result<Detection> {
+    pub fn run(&mut self, img: &RgbImage) -> Result<Detection> {
         let span = span!(Level::INFO, "pipeline");
         let _guard = span.enter();
 
@@ -57,7 +57,7 @@ impl Pipeline {
         Ok(Detection { faces })
     }
 
-    pub fn run_trace(&self, img: &mut RgbImage) -> Result<Detection> {
+    pub fn run_trace(&mut self, img: &mut RgbImage) -> Result<Detection> {
         let face_bounds = self.face_detector.run(img)?;
         let mut faces = Vec::new();
 

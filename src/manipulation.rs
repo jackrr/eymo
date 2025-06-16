@@ -7,6 +7,8 @@ pub use scale::Scale;
 pub use swap::Swap;
 pub use tile::Tile;
 
+use crate::imggpu::resize::GpuExecutor;
+
 mod copy;
 mod flip;
 mod rotate;
@@ -76,12 +78,16 @@ impl From<Tile> for Operation {
     }
 }
 
-pub trait Executable {
+trait Executable {
     fn execute(&self, img: &mut RgbImage) -> Result<()>;
 }
 
-impl Executable for OperationTree {
-    fn execute(&self, img: &mut RgbImage) -> Result<()> {
+trait GpuExecutable {
+    fn execute(&self, gpu: &GpuExecutor, img: &mut RgbImage) -> Result<()>;
+}
+
+impl OperationTree {
+    pub fn execute(&self, gpu: &GpuExecutor, img: &mut RgbImage) -> Result<()> {
         match &self.op {
             Operation::Rotate(o) => {
                 o.execute(img)?;
@@ -90,7 +96,7 @@ impl Executable for OperationTree {
                 o.execute(img)?;
             }
             Operation::Scale(o) => {
-                o.execute(img)?;
+                o.execute(gpu, img)?;
             }
             Operation::Tile(o) => {
                 o.execute(img)?;
@@ -105,7 +111,7 @@ impl Executable for OperationTree {
 
         for op in &self.sub_ops {
             // TODO: scope to roi of self.operation
-            op.execute(img)?;
+            op.execute(gpu, img)?;
         }
 
         Ok(())

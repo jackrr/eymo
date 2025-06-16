@@ -1,10 +1,10 @@
 use super::detection;
 use super::model::{initialize_model, Session};
 use super::Face;
+use crate::imggpu::resize::{CachedResizer, ResizeAlgo};
 use crate::shapes::point::Point;
 use crate::shapes::polygon::Polygon;
 use anyhow::Result;
-use image::imageops::{resize, FilterType};
 use image::{GenericImage, GenericImageView, Rgb, RgbImage};
 use imageproc::geometric_transformations::{rotate_about_center, Interpolation};
 use ndarray::Array;
@@ -13,6 +13,7 @@ use tracing::{debug, span, Level};
 
 pub struct FaceLandmarker {
     model: Session,
+    resizer: CachedResizer,
 }
 
 const HEIGHT: u32 = 192;
@@ -37,11 +38,12 @@ impl FaceLandmarker {
     pub fn new(threads: usize) -> Result<FaceLandmarker> {
         Ok(FaceLandmarker {
             model: initialize_model("mediapipe_face_landmark.onnx", threads)?,
+            resizer: CachedResizer::new()?,
         })
     }
 
     // ~80-90ms
-    pub fn run(&self, img: &RgbImage, face: &detection::Face) -> Result<Face> {
+    pub fn run(&mut self, img: &RgbImage, face: &detection::Face) -> Result<Face> {
         let span = span!(Level::INFO, "face_landmarker");
         let _guard = span.enter();
 
@@ -68,7 +70,9 @@ impl FaceLandmarker {
         // ~33-50ms
         let span_resize = span!(Level::INFO, "face_landmarker_resize");
         let resize_guard = span_resize.enter();
-        let input_img = resize(&face_img, WIDTH, HEIGHT, FilterType::Nearest);
+        let input_img = self
+            .resizer
+            .run(&face_img, WIDTH, HEIGHT, ResizeAlgo::Nearest);
         drop(resize_guard);
 
         // ~18ms

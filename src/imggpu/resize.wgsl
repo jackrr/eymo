@@ -1,5 +1,3 @@
-// @group(0) @binding(0) var input_texture : texture_2d<f32>;
-// @group(0) @binding(1) var input_sampler : sampler;
 @group(0) @binding(0) var<storage, read> input_buf : array<u32>;
 @group(0) @binding(1) var output_texture
     : texture_storage_2d<rgba8unorm, write>;

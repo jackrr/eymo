@@ -1,8 +1,8 @@
-use super::Executable;
+use super::GpuExecutable;
+use crate::imggpu::resize::{resize_with_executor, GpuExecutor, ResizeAlgo};
 use crate::manipulation::util;
 use crate::shapes::{rect::Rect, shape::Shape};
 use anyhow::Result;
-use image::imageops::{resize, FilterType};
 use image::{GenericImage, RgbImage};
 
 #[derive(Debug, Clone)]
@@ -17,20 +17,21 @@ impl Tile {
     }
 }
 
-impl Executable for Tile {
-    fn execute(&self, img: &mut RgbImage) -> Result<()> {
+impl GpuExecutable for Tile {
+    fn execute(&self, gpu: &GpuExecutor, img: &mut RgbImage) -> Result<()> {
         let src: Rect = self.src.clone().into();
         let src_img = util::image_at(src, img)?;
 
         let tileable = if self.scale == 1. {
             src_img
         } else {
-            resize(
+            resize_with_executor(
+                gpu,
                 &src_img,
                 (src_img.width() as f32 * self.scale).round() as u32,
                 (src_img.height() as f32 * self.scale).round() as u32,
-                FilterType::Triangle,
-            )
+                ResizeAlgo::Linear,
+            )?
         };
 
         let mut x_offset = 0;

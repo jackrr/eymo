@@ -99,13 +99,13 @@ impl OperationTree {
                 o.execute(gpu, img)?;
             }
             Operation::Tile(o) => {
-                o.execute(img)?;
+                o.execute(gpu, img)?;
             }
             Operation::Swap(s) => {
-                s.execute(img)?;
+                s.execute(gpu, img)?;
             }
             Operation::Copy(c) => {
-                c.execute(img)?;
+                c.execute(gpu, img)?;
             }
         }
 

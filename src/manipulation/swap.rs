@@ -1,8 +1,8 @@
-use super::Executable;
+use super::GpuExecutable;
+use crate::imggpu::resize::{resize_with_executor, GpuExecutor, ResizeAlgo};
 use crate::manipulation::util;
 use crate::shapes::{rect::Rect, shape::Shape};
 use anyhow::Result;
-use image::imageops::{resize, FilterType};
 use image::{GenericImage, RgbImage};
 
 #[derive(Debug, Clone)]
@@ -17,8 +17,8 @@ impl Swap {
     }
 }
 
-impl Executable for Swap {
-    fn execute(&self, img: &mut RgbImage) -> Result<()> {
+impl GpuExecutable for Swap {
+    fn execute(&self, gpu: &GpuExecutor, img: &mut RgbImage) -> Result<()> {
         match &self.a {
             Shape::Rect(a) => match &self.b {
                 Shape::Rect(b) => {
@@ -40,8 +40,10 @@ impl Executable for Swap {
                     let b_rect = Rect::from(b.clone());
                     let a_img = util::image_at(a_rect, img)?;
                     let b_img = util::image_at(b_rect, img)?;
-                    let a_img = resize(&a_img, b_rect.w, b_rect.h, FilterType::Triangle);
-                    let b_img = resize(&b_img, a_rect.w, a_rect.h, FilterType::Triangle);
+                    let a_img =
+                        resize_with_executor(&gpu, &a_img, b_rect.w, b_rect.h, ResizeAlgo::Linear)?;
+                    let b_img =
+                        resize_with_executor(&gpu, &b_img, a_rect.w, a_rect.h, ResizeAlgo::Linear)?;
 
                     let a_scaled = a.project(Rect::from_tl(0, 0, a_img.width(), a_img.height()));
                     let b_scaled = b.project(Rect::from_tl(0, 0, b_img.width(), b_img.height()));

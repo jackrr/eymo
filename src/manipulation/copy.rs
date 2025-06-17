@@ -1,10 +1,8 @@
-use super::{util, Executable};
+use super::{util, GpuExecutable};
+use crate::imggpu::resize::{resize_with_executor, GpuExecutor, ResizeAlgo};
 use crate::shapes::{polygon::ProjectedPolygonIter, rect::Rect, shape::Shape};
 use anyhow::Result;
-use image::{
-    imageops::{resize, FilterType},
-    GenericImage, RgbImage,
-};
+use image::{GenericImage, RgbImage};
 
 #[derive(Debug, Clone)]
 pub struct Copy {
@@ -18,11 +16,12 @@ impl Copy {
     }
 }
 
-impl Executable for Copy {
-    fn execute(&self, img: &mut RgbImage) -> Result<()> {
+impl GpuExecutable for Copy {
+    fn execute(&self, gpu: &GpuExecutor, img: &mut RgbImage) -> Result<()> {
         let src_img = util::image_at(self.src.clone().into(), img)?;
         let dest_rect: Rect = self.dest.clone().into();
-        let r_src = resize(&src_img, dest_rect.w, dest_rect.h, FilterType::Triangle);
+        let r_src =
+            resize_with_executor(gpu, &src_img, dest_rect.w, dest_rect.h, ResizeAlgo::Linear)?;
 
         match &self.src {
             Shape::Rect(sr) => match &self.dest {

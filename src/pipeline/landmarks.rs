@@ -2,11 +2,11 @@ use super::detection;
 use super::model::{initialize_model, Session};
 use super::Face;
 use crate::imggpu::resize::{CachedResizer, ResizeAlgo};
+use crate::imggpu::rotate::{rotate, GpuExecutor};
 use crate::shapes::point::Point;
 use crate::shapes::polygon::Polygon;
 use anyhow::Result;
-use image::{GenericImage, GenericImageView, Rgb, RgbImage};
-use imageproc::geometric_transformations::{rotate_about_center, Interpolation};
+use image::{GenericImage, GenericImageView, RgbImage};
 use ndarray::Array;
 use ort::value::Tensor;
 use tracing::{debug, span, Level};
@@ -14,6 +14,7 @@ use tracing::{debug, span, Level};
 pub struct FaceLandmarker {
     model: Session,
     resizer: CachedResizer,
+    gpu: GpuExecutor,
 }
 
 const HEIGHT: u32 = 192;
@@ -39,6 +40,7 @@ impl FaceLandmarker {
         Ok(FaceLandmarker {
             model: initialize_model("mediapipe_face_landmark.onnx", threads)?,
             resizer: CachedResizer::new()?,
+            gpu: GpuExecutor::new()?,
         })
     }
 
@@ -59,11 +61,11 @@ impl FaceLandmarker {
         // face_img - img cropped to face and rotated
         let mut face_img = RgbImage::new(bounds.w, bounds.h);
         face_img.copy_from(&view, 0, 0)?;
-        face_img = rotate_about_center(
+        face_img = rotate(
+            &self.gpu,
             &face_img,
             -face.rot_theta(),
-            Interpolation::Nearest,
-            Rgb([0u8, 0u8, 0u8]),
+            [0f32, 0f32, 0f32, 0f32],
         );
         drop(rotate_guard);
 

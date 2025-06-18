@@ -49,33 +49,32 @@ impl FaceLandmarker {
         let span = span!(Level::INFO, "face_landmarker");
         let _guard = span.enter();
 
-        // ~25-60ms
-        let span_rotate = span!(Level::INFO, "face_landmarker_rotate");
-        let rotate_guard = span_rotate.enter();
         let mut bounds = face.bounds.clone();
         // pad 25% on each side
         bounds.scale(1.5, img.width(), img.height());
 
+        let span_face_crop = span!(Level::INFO, "face_landmarker_face_crop");
+        let face_crop_guard = span_face_crop.enter();
         let view = *img.view(bounds.left(), bounds.top(), bounds.w, bounds.h);
 
-        // face_img - img cropped to face and rotated
+        // face_img - img cropped to face and and rotated
         let mut face_img = RgbImage::new(bounds.w, bounds.h);
         face_img.copy_from(&view, 0, 0)?;
+        drop(face_crop_guard);
+
+        let input_img = self
+            .resizer
+            .run(&face_img, WIDTH, HEIGHT, ResizeAlgo::Nearest);
+
+        let span_rotate = span!(Level::INFO, "face_landmarker_rotate");
+        let rotate_guard = span_rotate.enter();
         face_img = rotate(
-            &self.gpu,
+            &mut self.gpu,
             &face_img,
             -face.rot_theta(),
             [0f32, 0f32, 0f32, 0f32],
         );
         drop(rotate_guard);
-
-        // ~33-50ms
-        let span_resize = span!(Level::INFO, "face_landmarker_resize");
-        let resize_guard = span_resize.enter();
-        let input_img = self
-            .resizer
-            .run(&face_img, WIDTH, HEIGHT, ResizeAlgo::Nearest);
-        drop(resize_guard);
 
         // ~18ms
         let span_tensor = span!(Level::INFO, "face_landmarker_tensor");
@@ -83,6 +82,7 @@ impl FaceLandmarker {
         let input_img_height = input_img.height();
         let input_img_width = input_img.width();
 
+        // TODO: get resizer to be capable of returning raw f32 values in this format
         let input_arr =
             Array::from_shape_fn((1, HEIGHT as usize, WIDTH as usize, 3), |(_, y, x, c)| {
                 let x: u32 = x as u32;

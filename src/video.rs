@@ -78,7 +78,7 @@ pub fn process_frames(
                 *latest_frame = Some(image.clone());
                 drop(latest_frame);
 
-                let gpu = match pull_gpu.recv() {
+                let mut gpu = match pull_gpu.recv() {
                     Ok(gpu) => gpu,
                     Err(err) => {
                         error!("Failed to pull GpuExecutor off channel: {:?}", err);
@@ -89,7 +89,7 @@ pub fn process_frames(
                     MAX_LAG_MS.saturating_sub(rec_at.elapsed().as_millis()) as u32,
                     &mut image,
                     detection,
-                    &gpu,
+                    &mut gpu,
                 ) {
                     Ok(_) => {}
                     Err(err) => warn!("Could not complete processing frame {}: {}", frame_idx, err),

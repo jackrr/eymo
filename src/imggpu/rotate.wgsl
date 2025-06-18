@@ -40,13 +40,13 @@ fn get_rgb(byte_index : u32) -> vec3<u32> {
 }
 
 fn get_rgba(coords : vec2<u32>) -> vec4<f32> {
-  let array_offset = coords.y * width + coords.x;
+  let img_size = textureDimensions(output_texture);
+  let array_offset = coords.y * img_size.x + coords.x;
   let rgb = get_rgb(array_offset * 3);
   return vec4<f32>(float_color(rgb.x), float_color(rgb.y), float_color(rgb.z),
                    1.0);
 }
 
-// FIXME: I'm borked
 @compute @workgroup_size(8, 8) fn
     rotate_image_nearest(@builtin(global_invocation_id) global_id : vec3<u32>) {
   let img_size = vec2<i32>(textureDimensions(output_texture));
@@ -58,10 +58,10 @@ fn get_rgba(coords : vec2<u32>) -> vec4<f32> {
 
   // Calculate corresponding input coordinates
   let center = img_size / 2;
-  let trans = vec<f32>(coords - center);
-  let rot = (trans.x * rotation.x - trans.y * rotation.y,
-             trans.x * rotation.y + trans.y * rotation.x);
-  let input_coords = vec<i32>(floor(rot + trans));
+  let trans = vec2<f32>(coords - center);
+  let rot = vec2<f32>(trans.x * rotation.x - trans.y * rotation.y,
+                      trans.x * rotation.y + trans.y * rotation.x);
+  let input_coords = vec2<i32>(round(rot + trans));
 
   if (input_coords.x < 0 || input_coords.x >= img_size.x ||
       input_coords.y < 0 || input_coords.y >= img_size.y) {

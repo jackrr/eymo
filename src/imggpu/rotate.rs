@@ -2,7 +2,7 @@ pub use super::gpu::GpuExecutor;
 use image::{EncodableLayout, RgbImage};
 use tracing::{span, Level};
 
-pub fn rotate(gpu: &GpuExecutor, img: &RgbImage, theta: f32, default: [f32; 4]) -> RgbImage {
+pub fn rotate(gpu: &mut GpuExecutor, img: &RgbImage, theta: f32, default: [f32; 4]) -> RgbImage {
     let span = span!(Level::INFO, "rotate");
     let _guard = span.enter();
 
@@ -23,9 +23,8 @@ pub fn rotate(gpu: &GpuExecutor, img: &RgbImage, theta: f32, default: [f32; 4]) 
     });
     let (output_texture, mut output_buffer) = gpu.create_output_texture_pair(width, height);
 
-    let shader = gpu
-        .device
-        .create_shader_module(wgpu::include_wgsl!("rotate.wgsl"));
+    let shader_code = wgpu::include_wgsl!("rotate.wgsl");
+    let shader = gpu.load_shader("rotate", shader_code);
 
     let pipeline = gpu
         .device
@@ -69,6 +68,10 @@ pub fn rotate(gpu: &GpuExecutor, img: &RgbImage, theta: f32, default: [f32; 4]) 
         .write_buffer(&color_uniform, 0, &default.as_bytes());
 
     gpu.load_image(img, &mut input_buffer);
+
+    // TODO: how to get execution faster (currently 8-20ms)
+    let execgpu_span = span!(Level::INFO, "rotate_execgpu");
+    let _execgpu_guard = execgpu_span.enter();
     gpu.execute(
         &pipeline,
         &bind_group,

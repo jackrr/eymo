@@ -83,11 +83,11 @@ trait Executable {
 }
 
 trait GpuExecutable {
-    fn execute(&self, gpu: &GpuExecutor, img: &mut RgbImage) -> Result<()>;
+    fn execute(&self, gpu: &mut GpuExecutor, img: &mut RgbImage) -> Result<()>;
 }
 
 impl OperationTree {
-    pub fn execute(&self, gpu: &GpuExecutor, img: &mut RgbImage) -> Result<()> {
+    pub fn execute(&self, gpu: &mut GpuExecutor, img: &mut RgbImage) -> Result<()> {
         match &self.op {
             Operation::Rotate(o) => {
                 o.execute(img)?;

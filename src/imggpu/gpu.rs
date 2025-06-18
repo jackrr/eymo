@@ -2,11 +2,13 @@ use pollster::FutureExt;
 use anyhow::Result;
 use tracing::{span, Level};
 use image::{DynamicImage, RgbImage, RgbaImage};
-use std::num::NonZero;
+use wgpu::ShaderModuleDescriptor;
+use std::{collections::HashMap, num::NonZero};
 
 pub struct GpuExecutor {
     pub queue: wgpu::Queue,
-    pub device: wgpu::Device
+    pub device: wgpu::Device,
+    shaders: HashMap<String, wgpu::ShaderModule>
 }
 
 impl GpuExecutor {
@@ -27,13 +29,22 @@ impl GpuExecutor {
 			      trace: wgpu::Trace::Off
 		    }).await?;
 
-        Ok(Self { device, queue })
+        Ok(Self { device, queue, shaders: HashMap::new() })
     }
 
     pub fn new() -> Result<Self> {
         let span = span!(Level::INFO, "GpuExecutor#new");
         let _guard = span.enter();
         Self::init().block_on()
+    }
+
+    pub fn load_shader(&mut self, name: &str, desc: ShaderModuleDescriptor) -> wgpu::ShaderModule {
+        if !self.shaders.contains_key(name) {
+            let shader_mod = self.device.create_shader_module(desc);
+            self.shaders.insert(name.to_string(), shader_mod);
+        }
+
+        self.shaders.get(name).unwrap().clone()
     }
 
     pub fn image_buffer_size(&self, width: u32, height: u32) -> (u32, u32) {

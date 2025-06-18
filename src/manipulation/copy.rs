@@ -17,7 +17,7 @@ impl Copy {
 }
 
 impl GpuExecutable for Copy {
-    fn execute(&self, gpu: &GpuExecutor, img: &mut RgbImage) -> Result<()> {
+    fn execute(&self, gpu: &mut GpuExecutor, img: &mut RgbImage) -> Result<()> {
         let src_img = util::image_at(self.src.clone().into(), img)?;
         let dest_rect: Rect = self.dest.clone().into();
         let r_src =

@@ -18,7 +18,7 @@ impl Scale {
 }
 
 impl GpuExecutable for Scale {
-    fn execute(&self, gpu: &GpuExecutor, img: &mut RgbImage) -> Result<()> {
+    fn execute(&self, gpu: &mut GpuExecutor, img: &mut RgbImage) -> Result<()> {
         let zoom = self.zoom;
         let src_img = util::image_at(self.target.clone().into(), img)?;
         let src_img = resize_with_executor(

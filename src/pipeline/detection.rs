@@ -83,9 +83,8 @@ impl FaceDetector {
 
         drop(res_span_guard);
 
-        // ndarr -- approx 7ms
-        let span_ndarr = span!(Level::INFO, "face_detector_ndarr");
-        let ndarr_span_guard = span_ndarr.enter();
+        let span_tensor = span!(Level::INFO, "face_detector_tensor");
+        let tensor_span_guard = span_tensor.enter();
         let resized_width = resized.width();
         let resized_height = resized.height();
 
@@ -102,11 +101,7 @@ impl FaceDetector {
                     (resized.get_pixel(x, y)[c] as f32 / 127.5) - 1. // -1.0 - 1.0 range
                 }
             });
-        drop(ndarr_span_guard);
 
-        // tensor -- approx 23micros
-        let span_tensor = span!(Level::INFO, "face_detector_tensor");
-        let tensor_span_guard = span_tensor.enter();
         let input = Tensor::from_array(input_arr)?;
         drop(tensor_span_guard);
 

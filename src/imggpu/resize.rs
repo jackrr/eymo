@@ -20,12 +20,20 @@ impl ResizeAlgo {
 pub fn resize(img: &RgbImage, width: u32, height: u32, algo: ResizeAlgo) -> Result<RgbImage> {
     let span = span!(Level::INFO, "resize");
     let _guard = span.enter();
-    let executor = GpuExecutor::new()?;
-    Ok(Resizer::new(&executor, img.width(), img.height(), width, height, algo).run(&executor, img))
+    let mut executor = GpuExecutor::new()?;
+    Ok(Resizer::new(
+        &mut executor,
+        img.width(),
+        img.height(),
+        width,
+        height,
+        algo,
+    )
+    .run(&executor, img))
 }
 
 pub fn resize_with_executor(
-    executor: &GpuExecutor,
+    executor: &mut GpuExecutor,
     img: &RgbImage,
     width: u32,
     height: u32,
@@ -33,7 +41,7 @@ pub fn resize_with_executor(
 ) -> Result<RgbImage> {
     let span = span!(Level::INFO, "resize_with_executor");
     let _guard = span.enter();
-    Ok(Resizer::new(&executor, img.width(), img.height(), width, height, algo).run(&executor, img))
+    Ok(Resizer::new(executor, img.width(), img.height(), width, height, algo).run(&executor, img))
 }
 
 pub struct Resizer {
@@ -68,7 +76,14 @@ impl CachedResizer {
         height: u32,
         algo: ResizeAlgo,
     ) -> Resizer {
-        Resizer::new(&self.gpu, img.width(), img.height(), width, height, algo)
+        Resizer::new(
+            &mut self.gpu,
+            img.width(),
+            img.height(),
+            width,
+            height,
+            algo,
+        )
     }
 
     pub fn run(&mut self, img: &RgbImage, width: u32, height: u32, algo: ResizeAlgo) -> RgbImage {
@@ -96,7 +111,7 @@ impl CachedResizer {
 
 impl Resizer {
     pub fn new(
-        executor: &GpuExecutor,
+        executor: &mut GpuExecutor,
         input_width: u32,
         input_height: u32,
         output_width: u32,
@@ -125,21 +140,21 @@ impl Resizer {
         let (output_texture, output_buffer) =
             executor.create_output_texture_pair(output_width, output_height);
 
-        // TODO: cache this up a level?
-        let shader = executor
-            .device
-            .create_shader_module(wgpu::include_wgsl!("resize.wgsl"));
+        let shader_code = wgpu::include_wgsl!("resize.wgsl");
+        let shader = executor.load_shader("resize", shader_code);
+
+        let pipeline_descriptor = wgpu::ComputePipelineDescriptor {
+            label: Some("pipeline"),
+            layout: None,
+            module: &shader,
+            entry_point: algo.shader_name().into(),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            cache: None,
+        };
 
         let pipeline = executor
             .device
-            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("pipeline"),
-                layout: None,
-                module: &shader,
-                entry_point: algo.shader_name().into(),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                cache: None,
-            });
+            .create_compute_pipeline(&pipeline_descriptor);
 
         let bind_group = executor
             .device

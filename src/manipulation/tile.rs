@@ -18,7 +18,7 @@ impl Tile {
 }
 
 impl GpuExecutable for Tile {
-    fn execute(&self, gpu: &GpuExecutor, img: &mut RgbImage) -> Result<()> {
+    fn execute(&self, gpu: &mut GpuExecutor, img: &mut RgbImage) -> Result<()> {
         let src: Rect = self.src.clone().into();
         let src_img = util::image_at(src, img)?;
 

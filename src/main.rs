@@ -48,16 +48,20 @@ fn main() -> Result<()> {
     let total_threads = args.max_threads.unwrap_or(total_threads).min(total_threads);
     let mut pipeline = Pipeline::new(total_threads / 2)?;
 
-    // TODO: https://docs.rs/tracing/latest/tracing/
     match args.image_path {
         Some(p) => {
             let mut img = ImageReader::open(&p)?.decode()?.into_rgb8();
             let start = Instant::now();
             let result = pipeline.run(&img)?;
             debug!("{result:?}");
-            let gpu = GpuExecutor::new()?;
+            let mut gpu = GpuExecutor::new()?;
 
-            process_frame(1000, &mut img, Arc::new(RwLock::new(Some(result))), &gpu)?;
+            process_frame(
+                1000,
+                &mut img,
+                Arc::new(RwLock::new(Some(result))),
+                &mut gpu,
+            )?;
 
             debug!("Took {:?}", start.elapsed());
 
@@ -119,7 +123,7 @@ fn process_frame(
     within_ms: u32,
     img: &mut RgbImage,
     detection: Arc<RwLock<Option<Detection>>>,
-    gpu: &GpuExecutor,
+    gpu: &mut GpuExecutor,
 ) -> Result<()> {
     let span = span!(Level::INFO, "process_frame");
     let _guard = span.enter();
@@ -144,14 +148,14 @@ fn process_frame(
         let r_eye = face.r_eye;
         let nose = face.nose;
 
-        // let copy: Operation = Copy::new(mouth.clone().into(), r_eye.into()).into();
-        // ops.push(copy.into());
-        let scale: Operation = Scale::new(mouth.clone().into(), 3.).into();
-        ops.push(scale.into());
+        let copy: Operation = Copy::new(mouth.clone().into(), r_eye.into()).into();
+        ops.push(copy.into());
+        // let scale: Operation = Scale::new(mouth.clone().into(), 3.).into();
+        // ops.push(scale.into());
         // let swap: Operation = Swap::new(r_eye.clone().into(), l_eye.into()).into();
         // ops.push(swap.into());
-        // let rotate: Operation = Rotate::new(mouth.into(), 45.).into();
-        // ops.push(rotate.into());
+        let rotate: Operation = Rotate::new(mouth.into(), 45.).into();
+        ops.push(rotate.into());
     }
 
     for (idx, op) in ops.iter().enumerate() {

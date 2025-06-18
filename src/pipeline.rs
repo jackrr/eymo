@@ -37,6 +37,7 @@ impl Pipeline {
         })
     }
 
+    // Ahhh use gpu...
     pub fn run(&mut self, img: &RgbImage) -> Result<Detection> {
         let span = span!(Level::INFO, "pipeline");
         let _guard = span.enter();

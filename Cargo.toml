@@ -12,7 +12,7 @@ flume = "0.11.1"
 image = "0.25.6"
 imageproc = "0.25.0"
 ndarray = { version = "0.16.1" }
-nokhwa = { version = "0.10.7", features = ["input-native", "input-jscam", "output-threaded"] }
+nokhwa = { version = "0.10.7", features = ["input-native", "input-jscam", "output-wgpu"] }
 num_cpus = "1.16.0"
 ort = { version = "=2.0.0-rc.9", features = ["ndarray", "xnnpack"] }
 pollster = "0.4.0"

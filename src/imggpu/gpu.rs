@@ -1,9 +1,10 @@
 use pollster::FutureExt;
 use anyhow::Result;
-use tracing::{span, Level};
+use tracing::{span, Level, info};
 use image::{DynamicImage, RgbImage, RgbaImage};
 use wgpu::ShaderModuleDescriptor;
 use std::{collections::HashMap, num::NonZero};
+use super::util::{padded_bytes_per_row, int_div_round_up};
 
 pub struct GpuExecutor {
     pub queue: wgpu::Queue,
@@ -45,6 +46,108 @@ impl GpuExecutor {
         }
 
         self.shaders.get(name).unwrap().clone()
+    }
+
+    pub fn snapshot_texture(&self, tex: &wgpu::Texture, width: u32, height: u32, fname: &str) -> Result<()> {
+        let buffer_size = padded_bytes_per_row(width) as u64
+            * height as u64
+            * std::mem::size_of::<u8>() as u64;
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("snapshot_buffer"),
+            size: buffer_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("encoder"),
+            });
+
+        let padded_bytes_per_row = padded_bytes_per_row(width);
+        let unpadded_bytes_per_row = width as usize * 4;
+
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                aspect: wgpu::TextureAspect::All,
+                texture: tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: (padded_bytes_per_row as u32).into(),
+                    rows_per_image: height.into(),
+                },
+            },
+            tex.size(),
+        );
+
+        self.queue.submit(std::iter::once(encoder.finish()));
+
+        let buffer_slice = buffer.slice(..);
+        buffer_slice.map_async(wgpu::MapMode::Read, |r| r.unwrap());
+
+        self.device.poll(wgpu::PollType::Wait).unwrap();
+
+        let padded_data = buffer_slice.get_mapped_range();
+        let mut pixels: Vec<u8> = vec![0; unpadded_bytes_per_row * height as usize];
+        for (padded, pixels) in padded_data
+            .chunks_exact(padded_bytes_per_row)
+            .zip(pixels.chunks_exact_mut(unpadded_bytes_per_row))
+        {
+            pixels.copy_from_slice(&padded[..unpadded_bytes_per_row]);
+        }
+        drop(padded_data);
+        buffer.unmap();
+
+        let img =
+            RgbaImage::from_raw(width, height, pixels).unwrap();
+        DynamicImage::ImageRgba8(img).to_rgb8().save(fname)?;
+        Ok(())
+    }
+
+    // 14ms.. oof? or just first pass?
+    pub fn rgba_buffer_to_texture(&self, rgba_bytes: &[u8], width: u32, height: u32) -> wgpu::Texture {
+        let span = span!(Level::INFO, "rgba_buffer_to_texture");
+        let _guard = span.enter();
+
+        let texture_size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: texture_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            view_formats: &[wgpu::TextureFormat::Rgba8Unorm],
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
+        });
+
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            rgba_bytes,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            texture_size,
+        );
+
+        texture
     }
 
     pub fn image_buffer_size(&self, width: u32, height: u32) -> (u32, u32) {
@@ -185,16 +288,3 @@ impl GpuExecutor {
     }
 }
 
-fn padded_bytes_per_row(width: u32) -> usize {
-    let bytes_per_row = width as usize * 4;
-    let padding = (256 - bytes_per_row % 256) % 256;
-    bytes_per_row + padding
-}
-
-fn int_div_round_up(divisor: u32, dividend: u32) -> u32 {
-    (divisor / dividend)
-        + match divisor % dividend {
-            0 => 0,
-            _ => 1,
-        }
-}

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use image::{Rgb, RgbImage};
 
-use crate::shapes::polygon::Polygon;
+use crate::{imggpu::gpu::GpuExecutor, shapes::polygon::Polygon};
 use detection::FaceDetector;
 use imageproc::drawing;
 use landmarks::FaceLandmarker;
@@ -35,6 +35,26 @@ impl Pipeline {
             face_detector: FaceDetector::new(max_threads)?,
             face_landmarker: FaceLandmarker::new(max_threads)?,
         })
+    }
+
+    pub fn run_gpu(&mut self, tex: &wgpu::Texture, gpu: &mut GpuExecutor) -> Result<Detection> {
+        let span = span!(Level::INFO, "pipeline");
+        let _guard = span.enter();
+
+        let face_bounds = self.face_detector.run_gpu(tex, gpu)?;
+        info!("{face_bounds:?}");
+        let mut faces = Vec::new();
+        for face_bound in face_bounds {
+            trace!("Face bound: {face_bound:?}");
+
+            let face = self.face_landmarker.run_gpu(&face_bound, tex, gpu)?;
+            info!("Landmarker done");
+            trace!("Face features: {face:?}");
+
+            faces.push(face);
+        }
+
+        Ok(Detection { faces })
     }
 
     // Ahhh use gpu...

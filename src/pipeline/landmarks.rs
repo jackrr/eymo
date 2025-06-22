@@ -5,9 +5,11 @@ use crate::imggpu::resize::{CachedResizer, ResizeAlgo};
 use crate::imggpu::rotate::{rotate, GpuExecutor};
 use crate::shapes::point::Point;
 use crate::shapes::polygon::Polygon;
-use anyhow::Result;
+use crate::shapes::rect::Rect;
+use anyhow::{Error, Result};
 use image::{GenericImage, GenericImageView, RgbImage};
 use ndarray::Array;
+use ort::session::SessionOutputs;
 use ort::value::Tensor;
 use tracing::{debug, span, Level};
 
@@ -44,6 +46,28 @@ impl FaceLandmarker {
         })
     }
 
+    pub fn run_gpu(
+        &mut self,
+        face: &detection::Face,
+        tex: &wgpu::Texture,
+        gpu: &mut GpuExecutor,
+    ) -> Result<Face> {
+        let span = span!(Level::INFO, "face_landmarker");
+        let _guard = span.enter();
+
+        let mut bounds = face.bounds.clone();
+        // pad 25% on each side
+        bounds.scale(1.5, tex.width(), tex.height());
+
+        // 1. crop texture to bounds
+        // 2. resize image to WIDTHxHEIGHT
+        // 3. rotate image
+        // 4. output HEIGHTxWIDTH rgb f32 0->1 BUFFER
+        // 5. quick tensor from buffer
+        // 6. interpret outputs
+        Err(Error::msg("run_gpu Not implemented!"))
+    }
+
     // ~80-90ms
     pub fn run(&mut self, img: &RgbImage, face: &detection::Face) -> Result<Face> {
         let span = span!(Level::INFO, "face_landmarker");
@@ -53,36 +77,27 @@ impl FaceLandmarker {
         // pad 25% on each side
         bounds.scale(1.5, img.width(), img.height());
 
-        let span_face_crop = span!(Level::INFO, "face_landmarker_face_crop");
-        let face_crop_guard = span_face_crop.enter();
         let view = *img.view(bounds.left(), bounds.top(), bounds.w, bounds.h);
 
         // face_img - img cropped to face and and rotated
         let mut face_img = RgbImage::new(bounds.w, bounds.h);
         face_img.copy_from(&view, 0, 0)?;
-        drop(face_crop_guard);
 
         let input_img = self
             .resizer
             .run(&face_img, WIDTH, HEIGHT, ResizeAlgo::Nearest);
 
-        let span_rotate = span!(Level::INFO, "face_landmarker_rotate");
-        let rotate_guard = span_rotate.enter();
         face_img = rotate(
             &mut self.gpu,
             &face_img,
             -face.rot_theta(),
             [0f32, 0f32, 0f32, 0f32],
         );
-        drop(rotate_guard);
 
         // ~18ms
-        let span_tensor = span!(Level::INFO, "face_landmarker_tensor");
-        let tensor_guard = span_tensor.enter();
         let input_img_height = input_img.height();
         let input_img_width = input_img.width();
 
-        // TODO: get resizer to be capable of returning raw f32 values in this format
         let input_arr =
             Array::from_shape_fn((1, HEIGHT as usize, WIDTH as usize, 3), |(_, y, x, c)| {
                 let x: u32 = x as u32;
@@ -98,69 +113,73 @@ impl FaceLandmarker {
             });
 
         let input = Tensor::from_array(input_arr)?;
-        drop(tensor_guard);
 
         // ~3-10ms
-        let span_inference = span!(Level::INFO, "face_landmarker_inference");
-        let inference_guard = span_inference.enter();
         let outputs = self.model.run(ort::inputs!["input_1" => input]?)?;
 
-        let output = outputs["conv2d_21"].try_extract_tensor::<f32>()?;
-        let mesh = output.squeeze().squeeze().squeeze();
-        drop(inference_guard);
-
-        // ~20micros
-        let span_results = span!(Level::INFO, "face_landmarker_results");
-        let results_guard = span_results.enter();
-
-        let r = mesh.as_slice().unwrap();
-
-        let x_scale = face_img.width() as f32 / input_img_width as f32;
-        let y_scale = face_img.height() as f32 / input_img_height as f32;
-        let x_offset = bounds.left() as f32;
-        let y_offset = bounds.top() as f32;
-        let origin = bounds.center();
-        let rotation = face.rot_theta();
-        let result = Face {
-            mouth: extract_feature(
-                &r,
-                &MOUTH_IDXS,
-                x_offset,
-                y_offset,
-                x_scale,
-                y_scale,
-                &origin,
-                rotation,
-            ),
-            l_eye: extract_feature(
-                &r,
-                &L_EYE_IDXS,
-                x_offset,
-                y_offset,
-                x_scale,
-                y_scale,
-                &origin,
-                rotation,
-            ),
-            r_eye: extract_feature(
-                &r,
-                &R_EYE_IDXS,
-                x_offset,
-                y_offset,
-                x_scale,
-                y_scale,
-                &origin,
-                rotation,
-            ),
-            nose: extract_feature(
-                &r, &NOSE_IDXS, x_offset, y_offset, x_scale, y_scale, &origin, rotation,
-            ),
-        };
-
-        drop(results_guard);
-
-        Ok(result)
+        extract_results(
+            outputs,
+            input_img_width,
+            input_img_height,
+            bounds,
+            face.rot_theta(),
+        )
     }
+}
+
+fn extract_results(
+    outputs: SessionOutputs,
+    input_width: u32,
+    input_height: u32,
+    run_bounds: Rect,
+    run_rot: f32,
+) -> Result<Face> {
+    let output = outputs["conv2d_21"].try_extract_tensor::<f32>()?;
+    let mesh = output.squeeze().squeeze().squeeze();
+
+    let r = mesh.as_slice().unwrap();
+
+    let x_scale = run_bounds.w as f32 / input_width as f32;
+    let y_scale = run_bounds.h as f32 / input_height as f32;
+    let x_offset = run_bounds.left() as f32;
+    let y_offset = run_bounds.top() as f32;
+    let origin = run_bounds.center();
+
+    Ok(Face {
+        mouth: extract_feature(
+            &r,
+            &MOUTH_IDXS,
+            x_offset,
+            y_offset,
+            x_scale,
+            y_scale,
+            &origin,
+            run_rot,
+        ),
+        l_eye: extract_feature(
+            &r,
+            &L_EYE_IDXS,
+            x_offset,
+            y_offset,
+            x_scale,
+            y_scale,
+            &origin,
+            run_rot,
+        ),
+        r_eye: extract_feature(
+            &r,
+            &R_EYE_IDXS,
+            x_offset,
+            y_offset,
+            x_scale,
+            y_scale,
+            &origin,
+            run_rot,
+        ),
+        nose: extract_feature(
+            &r, &NOSE_IDXS, x_offset, y_offset, x_scale, y_scale, &origin, run_rot,
+        ),
+    })
 }
 
 fn extract_feature(

@@ -1,27 +1,19 @@
-use crate::imggpu::resize::GpuExecutor;
-use crate::pipeline::Detection;
 use anyhow::Result;
-use image::{EncodableLayout, RgbImage};
-use nokhwa::Camera;
-use std::sync::{Arc, Mutex, RwLock};
-use std::thread;
-use std::time::{Duration, Instant};
-use tracing::{debug, error, warn};
+use image::{EncodableLayout, RgbaImage};
+use tracing::debug;
 
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-use crate::process_frame;
-
 use nokhwa::{
     nokhwa_initialize,
-    pixel_format::RgbFormat,
+    pixel_format::RgbAFormat,
     query,
     utils::{ApiBackend, RequestedFormat, RequestedFormatType},
-    CallbackCamera,
+    Camera,
 };
 
-pub fn create_input_stream(fps: u32) -> Camera {
+pub fn create_input_stream(fps: u32) -> Result<Camera> {
     nokhwa_initialize(|granted| {
         debug!("User said {}", granted);
     });
@@ -31,29 +23,30 @@ pub fn create_input_stream(fps: u32) -> Camera {
         .iter()
         .for_each(|cam| debug!("Found camera: {:?}", cam));
 
-    let camera = Camera::new(
+    let mut camera = Camera::new(
         cameras.last().unwrap().index().clone(),
-        RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate),
-    );
+        RequestedFormat::new::<RgbAFormat>(RequestedFormatType::AbsoluteHighestFrameRate),
+    )?;
 
     camera.set_frame_rate(fps)?;
     camera.open_stream().unwrap();
-    camera
+    Ok(camera)
 }
 
-struct OutputVideoStream {
+pub struct OutputVideoStream {
     ffplay: std::process::Child,
 }
 
 impl OutputVideoStream {
     // TODO: make configurable to enable v4loopback, whatever is used on mac
-    fn new(width: u32, height: u32) -> Result<Self> {
+    pub fn new(width: u32, height: u32) -> Result<Self> {
         let ffplay = Command::new("ffplay")
             .args(&[
                 "-f",
                 "rawvideo",
                 "-pixel_format",
-                "rgb24",
+                // "rgb24",
+                "rgba32",
                 "-video_size",
                 &format!("{}x{}", width, height),
                 "-framerate",
@@ -71,7 +64,7 @@ impl OutputVideoStream {
         Ok(Self { ffplay })
     }
 
-    fn write_frame(&mut self, img: &RgbImage) -> Result<()> {
+    pub fn write_frame(&mut self, img: RgbaImage) -> Result<()> {
         if let Some(stdin) = self.ffplay.stdin.as_mut() {
             stdin.write_all(img.as_bytes())?;
             stdin.flush()?;
@@ -80,7 +73,7 @@ impl OutputVideoStream {
         Ok(())
     }
 
-    fn close(mut self) -> Result<()> {
+    pub fn close(mut self) -> Result<()> {
         drop(self.ffplay.stdin.take());
         self.ffplay.wait()?;
         Ok(())

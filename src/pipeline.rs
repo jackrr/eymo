@@ -40,13 +40,11 @@ impl Pipeline {
         let _guard = span.enter();
 
         let face_bounds = self.face_detector.run_gpu(tex, gpu)?;
-        info!("{face_bounds:?}");
         let mut faces = Vec::new();
         for face_bound in face_bounds {
             trace!("Face bound: {face_bound:?}");
 
             let face = self.face_landmarker.run_gpu(&face_bound, tex, gpu)?;
-            info!("Landmarker done");
             trace!("Face features: {face:?}");
 
             faces.push(face);

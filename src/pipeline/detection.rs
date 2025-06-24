@@ -1,13 +1,13 @@
 use super::model::{initialize_model, Session};
 use crate::imggpu;
-use crate::imggpu::resize::{CachedResizer, GpuExecutor};
+use crate::imggpu::resize::GpuExecutor;
 use crate::imggpu::vertex::Vertex;
 use crate::shapes::point::PointF32;
 use crate::shapes::rect::{Rect, RectF32};
 use anchors::gen_anchors;
 use anyhow::Result;
 use ort::session::SessionOutputs;
-use tracing::{debug, span, trace, Level};
+use tracing::{span, trace, Level};
 use wgpu::util::DeviceExt;
 
 mod anchors;
@@ -18,7 +18,6 @@ const HEIGHT: u32 = 128;
 pub struct FaceDetector {
     model: Session,
     anchors: [RectF32; 896],
-    resizer: CachedResizer,
 }
 
 #[derive(Debug, Clone)]
@@ -42,7 +41,7 @@ impl Face {
     pub fn rot_theta(&self) -> f32 {
         let dx = self.r_eye.x - self.l_eye.x;
         let dy = self.r_eye.y - self.l_eye.y;
-        -dy.atan2(dx)
+        dy.atan2(dx)
     }
 }
 
@@ -70,7 +69,6 @@ impl FaceDetector {
         Ok(FaceDetector {
             model: initialize_model("mediapipe_face_detection_short_range.onnx", threads)?,
             anchors: gen_anchors(),
-            resizer: CachedResizer::new()?,
         })
     }
 

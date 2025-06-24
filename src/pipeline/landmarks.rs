@@ -2,24 +2,18 @@ use super::detection;
 use super::model::{initialize_model, Session};
 use super::Face;
 use crate::imggpu;
-use crate::imggpu::resize::{CachedResizer, ResizeAlgo};
-use crate::imggpu::rotate::{rotate, GpuExecutor};
+use crate::imggpu::rotate::GpuExecutor;
 use crate::imggpu::vertex::Vertex;
 use crate::shapes::point::Point;
 use crate::shapes::polygon::Polygon;
 use crate::shapes::rect::Rect;
-use anyhow::{Error, Result};
-use image::{GenericImage, GenericImageView, RgbImage};
-use ndarray::Array;
+use anyhow::Result;
 use ort::session::SessionOutputs;
-use ort::value::Tensor;
-use tracing::{info, span, Level};
+use tracing::{span, Level};
 use wgpu::util::DeviceExt;
 
 pub struct FaceLandmarker {
     model: Session,
-    resizer: CachedResizer,
-    gpu: GpuExecutor,
 }
 
 const HEIGHT: u32 = 192;
@@ -44,8 +38,6 @@ impl FaceLandmarker {
     pub fn new(threads: usize) -> Result<FaceLandmarker> {
         Ok(FaceLandmarker {
             model: initialize_model("mediapipe_face_landmark.onnx", threads)?,
-            resizer: CachedResizer::new()?,
-            gpu: GpuExecutor::new()?,
         })
     }
 
@@ -103,17 +95,6 @@ impl FaceLandmarker {
                 cache: None,
             });
 
-        let out_dims = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("out_dims"),
-            size: 8,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        gpu.queue.write_buffer(
-            &out_dims,
-            0,
-            &bytemuck::cast_slice(&[(WIDTH as f32), (HEIGHT as f32)]),
-        );
         let rot = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("rot"),
             size: 8,
@@ -139,10 +120,6 @@ impl FaceLandmarker {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: out_dims.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
                     resource: rot.as_entire_binding(),
                 },
             ],
@@ -171,8 +148,18 @@ impl FaceLandmarker {
                 label: Some("encoder"),
             });
 
-        let vertices = Vertex::triangles_for_shape(bounds, tex.width(), tex.height());
-        info!("vertices: {vertices:?}");
+        let right = bounds.right() as f32 / tex.width() as f32;
+        let left = bounds.left() as f32 / tex.width() as f32;
+        let top = bounds.top() as f32 / tex.height() as f32;
+        let bottom = bounds.bottom() as f32 / tex.height() as f32;
+        let vertices = Vec::from([
+            Vertex::new_with_tex(&[1., 1.], &[right, top]),
+            Vertex::new_with_tex(&[-1., 1.], &[left, top]),
+            Vertex::new_with_tex(&[-1., -1.], &[left, bottom]),
+            Vertex::new_with_tex(&[-1., -1.], &[left, bottom]),
+            Vertex::new_with_tex(&[1., -1.], &[right, bottom]),
+            Vertex::new_with_tex(&[1., 1.], &[right, top]),
+        ]);
         let vertex_buffer = gpu
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -202,70 +189,10 @@ impl FaceLandmarker {
 
         gpu.queue.submit(std::iter::once(encoder.finish()));
 
-        gpu.snapshot_texture(&output_tex, WIDTH, HEIGHT, "tmp/landmark_prepped.jpg")?;
-
         let tensor =
             imggpu::rgb::texture_to_tensor(gpu, &output_tex, imggpu::rgb::OutputRange::ZeroToOne)?;
         let outputs = self.model.run(ort::inputs!["input_1" => tensor]?)?;
         extract_results(outputs, tex.width(), tex.height(), bounds, theta)
-    }
-
-    // ~80-90ms
-    pub fn run(&mut self, img: &RgbImage, face: &detection::Face) -> Result<Face> {
-        let span = span!(Level::INFO, "face_landmarker");
-        let _guard = span.enter();
-
-        let mut bounds = face.bounds.clone();
-        // pad 25% on each side
-        bounds.scale(1.5, img.width(), img.height());
-
-        let view = *img.view(bounds.left(), bounds.top(), bounds.w, bounds.h);
-
-        // face_img - img cropped to face and and rotated
-        let mut face_img = RgbImage::new(bounds.w, bounds.h);
-        face_img.copy_from(&view, 0, 0)?;
-
-        let input_img = self
-            .resizer
-            .run(&face_img, WIDTH, HEIGHT, ResizeAlgo::Nearest);
-
-        face_img = rotate(
-            &mut self.gpu,
-            &face_img,
-            -face.rot_theta(),
-            [0f32, 0f32, 0f32, 0f32],
-        );
-
-        // ~18ms
-        let input_img_height = input_img.height();
-        let input_img_width = input_img.width();
-
-        let input_arr =
-            Array::from_shape_fn((1, HEIGHT as usize, WIDTH as usize, 3), |(_, y, x, c)| {
-                let x: u32 = x as u32;
-                let y: u32 = y as u32;
-
-                if y >= input_img_height {
-                    0.
-                } else if x >= input_img_width {
-                    0.
-                } else {
-                    input_img.get_pixel(x, y)[c] as f32 / 255. // 0. - 1. range
-                }
-            });
-
-        let input = Tensor::from_array(input_arr)?;
-
-        // ~3-10ms
-        let outputs = self.model.run(ort::inputs!["input_1" => input]?)?;
-
-        extract_results(
-            outputs,
-            input_img_width,
-            input_img_height,
-            bounds,
-            face.rot_theta(),
-        )
     }
 }
 

@@ -100,9 +100,9 @@ fn process_frame(
         frame.source_frame_format()
     );
     // TODO: can we get nokwha to give us rgba byte buffer to prevent need for decoding?
-    // let input_img: RgbaImage = frame.decode_image::<RgbAFormat>()?;
-    let input_img = image::open("./tmp/input_img.jpg")?;
-    let input_img: RgbaImage = input_img.into();
+    let input_img: RgbaImage = frame.decode_image::<RgbAFormat>()?;
+    // let input_img = image::open("./tmp/input_img.jpg")?;
+    // let input_img: RgbaImage = input_img.into();
     // DynamicImage::ImageRgba8(input_img.clone())
     //     .to_rgb8()
     //     .save("tmp/input_img.jpg")?;

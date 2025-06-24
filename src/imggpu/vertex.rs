@@ -4,10 +4,12 @@ use crate::shapes::shape::Shape;
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable, PartialEq)]
 pub struct Vertex {
     position: [f32; 2],
+    tex_coord: [f32; 2],
 }
 
 impl Vertex {
-    const ATTRIBS: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![0 => Float32x2];
+    const ATTRIBS: [wgpu::VertexAttribute; 2] =
+        wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2];
 
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
         use std::mem;
@@ -22,6 +24,14 @@ impl Vertex {
     pub fn new(coord: &[f32; 2]) -> Self {
         Self {
             position: coord.clone(),
+            tex_coord: [0., 0.],
+        }
+    }
+
+    pub fn new_with_tex(coord: &[f32; 2], tex_coord: &[f32; 2]) -> Self {
+        Self {
+            position: coord.clone(),
+            tex_coord: tex_coord.clone(),
         }
     }
 

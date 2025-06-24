@@ -66,6 +66,7 @@ impl OutputVideoStream {
 
     pub fn write_frame(&mut self, img: RgbaImage) -> Result<()> {
         if let Some(stdin) = self.ffplay.stdin.as_mut() {
+            // FIXME: this aint workin
             stdin.write_all(img.as_bytes())?;
             stdin.flush()?;
         }

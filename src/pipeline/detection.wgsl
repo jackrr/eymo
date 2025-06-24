@@ -4,6 +4,7 @@
 
 struct VertexIn {
   @location(0) position : vec2f,
+	@location(1) tex_coord: vec2f,
 }
 
 struct VertexOut {

@@ -1,8 +1,10 @@
 use super::detection;
 use super::model::{initialize_model, Session};
 use super::Face;
+use crate::imggpu;
 use crate::imggpu::resize::{CachedResizer, ResizeAlgo};
 use crate::imggpu::rotate::{rotate, GpuExecutor};
+use crate::imggpu::vertex::Vertex;
 use crate::shapes::point::Point;
 use crate::shapes::polygon::Polygon;
 use crate::shapes::rect::Rect;
@@ -11,7 +13,8 @@ use image::{GenericImage, GenericImageView, RgbImage};
 use ndarray::Array;
 use ort::session::SessionOutputs;
 use ort::value::Tensor;
-use tracing::{debug, span, Level};
+use tracing::{info, span, Level};
+use wgpu::util::DeviceExt;
 
 pub struct FaceLandmarker {
     model: Session,
@@ -55,17 +58,156 @@ impl FaceLandmarker {
         let span = span!(Level::INFO, "face_landmarker");
         let _guard = span.enter();
 
+        let theta = face.rot_theta();
         let mut bounds = face.bounds.clone();
         // pad 25% on each side
         bounds.scale(1.5, tex.width(), tex.height());
 
-        // 1. crop texture to bounds
-        // 2. resize image to WIDTHxHEIGHT
-        // 3. rotate image
-        // 4. output HEIGHTxWIDTH rgb f32 0->1 BUFFER
-        // 5. quick tensor from buffer
-        // 6. interpret outputs
-        Err(Error::msg("run_gpu Not implemented!"))
+        let sampler = gpu.device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        let shader_code = wgpu::include_wgsl!("landmarks.wgsl");
+        let shader = gpu.load_shader("landmarks", shader_code);
+
+        let render_pipeline = gpu
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("render_pipeline"),
+                layout: None,
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vert_main"),
+                    compilation_options: Default::default(),
+                    buffers: &[Vertex::desc()],
+                },
+                primitive: wgpu::PrimitiveState {
+                    ..Default::default()
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("frag_main"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                depth_stencil: None,
+                multisample: Default::default(),
+                multiview: None,
+                cache: None,
+            });
+
+        let out_dims = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("out_dims"),
+            size: 8,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        gpu.queue.write_buffer(
+            &out_dims,
+            0,
+            &bytemuck::cast_slice(&[(WIDTH as f32), (HEIGHT as f32)]),
+        );
+        let rot = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("rot"),
+            size: 8,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        gpu.queue
+            .write_buffer(&rot, 0, &bytemuck::cast_slice(&[theta.cos(), theta.sin()]));
+
+        let render_bg = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("render_bind_group"),
+            layout: &render_pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(
+                        &tex.create_view(&Default::default()),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: out_dims.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: rot.as_entire_binding(),
+                },
+            ],
+        });
+
+        let output_tex = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: WIDTH,
+                height: HEIGHT,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            view_formats: &[wgpu::TextureFormat::Rgba8Unorm],
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::TEXTURE_BINDING,
+        });
+
+        let mut encoder = gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("encoder"),
+            });
+
+        let vertices = Vertex::triangles_for_shape(bounds, tex.width(), tex.height());
+        info!("vertices: {vertices:?}");
+        let vertex_buffer = gpu
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("vertex_buffer"),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+
+        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("render_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &output_tex.create_view(&Default::default()),
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(Default::default()),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+
+        render_pass.set_pipeline(&render_pipeline);
+        render_pass.set_bind_group(0, &render_bg, &[]);
+        render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        render_pass.draw(0..vertices.len() as u32, 0..1);
+        drop(render_pass);
+
+        gpu.queue.submit(std::iter::once(encoder.finish()));
+
+        gpu.snapshot_texture(&output_tex, WIDTH, HEIGHT, "tmp/landmark_prepped.jpg")?;
+
+        let tensor =
+            imggpu::rgb::texture_to_tensor(gpu, &output_tex, imggpu::rgb::OutputRange::ZeroToOne)?;
+        let outputs = self.model.run(ort::inputs!["input_1" => tensor]?)?;
+        extract_results(outputs, tex.width(), tex.height(), bounds, theta)
     }
 
     // ~80-90ms

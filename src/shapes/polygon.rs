@@ -10,6 +10,7 @@ pub struct Polygon {
 }
 
 impl Polygon {
+    // Points assumed to be provided in clockwise order...
     pub fn new(points: Vec<Point>) -> Self {
         let points_i32 = points.iter().map(|p| p.clone().into()).collect();
         Self { points, points_i32 }

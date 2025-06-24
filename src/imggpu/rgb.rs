@@ -5,7 +5,25 @@ use image::Rgb;
 use ort::value::Tensor;
 use tracing::{debug, info, span, Level};
 
-pub fn texture_to_tensor(gpu: &mut GpuExecutor, texture: &wgpu::Texture) -> Result<Tensor<f32>> {
+pub enum OutputRange {
+    ZeroToOne,
+    NegOneToOne,
+}
+
+impl OutputRange {
+    fn entry_point(&self) -> &str {
+        match self {
+            Self::NegOneToOne => "tex_to_rgb_buf_neg1_1",
+            Self::ZeroToOne => "tex_to_rgb_buf_0_1",
+        }
+    }
+}
+
+pub fn texture_to_tensor(
+    gpu: &mut GpuExecutor,
+    texture: &wgpu::Texture,
+    output_range: OutputRange,
+) -> Result<Tensor<f32>> {
     let span = span!(Level::INFO, "texture_to_tensor");
     let _guard = span.enter();
 
@@ -33,7 +51,7 @@ pub fn texture_to_tensor(gpu: &mut GpuExecutor, texture: &wgpu::Texture) -> Resu
             label: Some("compute_pipeline"),
             layout: None,
             module: &shader,
-            entry_point: Some("tex_to_rgb_buf"),
+            entry_point: Some(output_range.entry_point()),
             compilation_options: Default::default(),
             cache: None,
         });

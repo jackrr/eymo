@@ -1,14 +1,12 @@
 use super::model::{initialize_model, Session};
 use crate::imggpu;
-use crate::imggpu::resize::{CachedResizer, GpuExecutor, ResizeAlgo};
+use crate::imggpu::resize::{CachedResizer, GpuExecutor};
+use crate::imggpu::vertex::Vertex;
 use crate::shapes::point::PointF32;
 use crate::shapes::rect::{Rect, RectF32};
 use anchors::gen_anchors;
-use anyhow::{Error, Result};
-use image::RgbImage;
-use ndarray::Array;
+use anyhow::Result;
 use ort::session::SessionOutputs;
-use ort::value::Tensor;
 use tracing::{debug, span, trace, Level};
 use wgpu::util::DeviceExt;
 
@@ -21,28 +19,6 @@ pub struct FaceDetector {
     model: Session,
     anchors: [RectF32; 896],
     resizer: CachedResizer,
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct Vertex {
-    position: [f32; 2],
-    tex_dims: [f32; 2],
-}
-
-impl Vertex {
-    const ATTRIBS: [wgpu::VertexAttribute; 2] =
-        wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2];
-
-    fn desc() -> wgpu::VertexBufferLayout<'static> {
-        use std::mem;
-
-        wgpu::VertexBufferLayout {
-            array_stride: mem::size_of::<Self>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &Self::ATTRIBS,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -79,7 +55,7 @@ impl FaceDetector {
     Model Input: 128x128 f32 image
     Model Output:
     - 896 length array of confidence scores (classificators)
-    - 896 length 2D array of detection coords (regressors)
+      - 896 length 2D array of detection coords (regressors)
 
     The first 4 values in the detection coords are centroid, width,
     height offsets applied to a particular cell among 2 predetermined
@@ -89,7 +65,7 @@ impl FaceDetector {
 
     // scale gets interpolated
 
-    */
+     */
     pub fn new(threads: usize) -> Result<FaceDetector> {
         Ok(FaceDetector {
             model: initialize_model("mediapipe_face_detection_short_range.onnx", threads)?,
@@ -143,6 +119,18 @@ impl FaceDetector {
                 cache: None,
             });
 
+        let out_dims = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("out_dims"),
+            size: 8,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        gpu.queue.write_buffer(
+            &out_dims,
+            0,
+            &bytemuck::cast_slice(&[(WIDTH as f32), (HEIGHT as f32)]),
+        );
+
         let render_bg = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("render_bind_group"),
             layout: &render_pipeline.get_bind_group_layout(0),
@@ -156,6 +144,10 @@ impl FaceDetector {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: out_dims.as_entire_binding(),
                 },
             ],
         });
@@ -183,32 +175,7 @@ impl FaceDetector {
                 label: Some("encoder"),
             });
 
-        let vertices = [
-            Vertex {
-                position: [1., 1.],
-                tex_dims: [WIDTH as f32, HEIGHT as f32],
-            },
-            Vertex {
-                position: [-1., 1.],
-                tex_dims: [WIDTH as f32, HEIGHT as f32],
-            },
-            Vertex {
-                position: [-1., -1.],
-                tex_dims: [WIDTH as f32, HEIGHT as f32],
-            },
-            Vertex {
-                position: [1., 1.],
-                tex_dims: [WIDTH as f32, HEIGHT as f32],
-            },
-            Vertex {
-                position: [-1., -1.],
-                tex_dims: [WIDTH as f32, HEIGHT as f32],
-            },
-            Vertex {
-                position: [1., -1.],
-                tex_dims: [WIDTH as f32, HEIGHT as f32],
-            },
-        ];
+        let vertices = Vertex::triangles_for_full_coverage();
         let vertex_buffer = gpu
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -237,51 +204,18 @@ impl FaceDetector {
         render_pass.set_pipeline(&render_pipeline);
         render_pass.set_bind_group(0, &render_bg, &[]);
         render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-        render_pass.draw(0..6, 0..1);
+        render_pass.draw(0..vertices.len() as u32, 0..1);
         drop(render_pass);
 
         gpu.queue.submit(std::iter::once(encoder.finish()));
 
-        gpu.snapshot_texture(&resize_output_tex, WIDTH, HEIGHT, "tmp/resized.jpg")?;
-
-        let tensor = imggpu::rgb::texture_to_tensor(gpu, &resize_output_tex)?;
+        let tensor = imggpu::rgb::texture_to_tensor(
+            gpu,
+            &resize_output_tex,
+            imggpu::rgb::OutputRange::NegOneToOne,
+        )?;
         let outputs = self.model.run(ort::inputs!["input" => tensor]?)?;
         self.extract_results(outputs, tex.width(), tex.height(), WIDTH, HEIGHT)
-    }
-
-    pub fn run(&mut self, img: &RgbImage) -> Result<Vec<Face>> {
-        let span = span!(Level::INFO, "face_detector");
-        let _guard = span.enter();
-
-        let resized = self.resizer.run(img, WIDTH, HEIGHT, ResizeAlgo::Nearest);
-
-        let resized_width = resized.width();
-        let resized_height = resized.height();
-
-        let input_arr =
-            Array::from_shape_fn((1, HEIGHT as usize, WIDTH as usize, 3), |(_, y, x, c)| {
-                let x: u32 = x as u32;
-                let y: u32 = y as u32;
-
-                if y >= resized_height {
-                    0.
-                } else if x >= resized_width {
-                    0.
-                } else {
-                    (resized.get_pixel(x, y)[c] as f32 / 127.5) - 1. // -1.0 - 1.0 range
-                }
-            });
-
-        let input = Tensor::from_array(input_arr)?;
-
-        let outputs = self.model.run(ort::inputs!["input" => input]?)?;
-        self.extract_results(
-            outputs,
-            img.width(),
-            img.height(),
-            resized_width,
-            resized_height,
-        )
     }
 
     fn extract_results(

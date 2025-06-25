@@ -1,9 +1,12 @@
 #![warn(unused_extern_crates)]
 
+use crate::manipulation::{Copy, Operation, OperationTree, Rotate, Scale, Swap, Tile};
+use crate::pipeline::Pipeline;
 use anyhow::{Error, Result};
 use clap::Parser;
-use image::{DynamicImage, RgbaImage};
+use image::{DynamicImage, RgbImage, RgbaImage};
 use imggpu::resize::GpuExecutor;
+use imggpu::rgb;
 use nokhwa::pixel_format::RgbAFormat;
 use nokhwa::{Buffer, FormatDecoder};
 use num_cpus::get as get_cpu_count;
@@ -12,9 +15,6 @@ use tracing::{debug, error, info, span, trace, warn, Level};
 use tracing_subscriber::fmt;
 use tracing_subscriber::fmt::format::FmtSpan;
 use video::{create_input_stream, OutputVideoStream};
-
-use crate::manipulation::{Copy, Operation, OperationTree, Rotate, Scale, Swap, Tile};
-use crate::pipeline::Pipeline;
 mod imggpu;
 mod manipulation;
 mod pipeline;
@@ -73,8 +73,6 @@ fn main() -> Result<()> {
             },
             Err(e) => error!("Failed to process frame: {e:?}"),
         }
-
-        return Ok(());
     }
 
     output_stream.close()?;
@@ -88,7 +86,7 @@ fn process_frame(
     gpu: &mut GpuExecutor,
     pipeline: &mut Pipeline,
     within_ms: u32,
-) -> Result<RgbaImage> {
+) -> Result<RgbImage> {
     let span = span!(Level::INFO, "process_frame");
     let _guard = span.enter();
     let start = Instant::now();
@@ -111,21 +109,22 @@ fn process_frame(
         gpu.rgba_buffer_to_texture(input_img.as_raw(), input_img.width(), input_img.height());
 
     let detection = pipeline.run_gpu(&texture, gpu)?;
-    info!("Detection: {detection:?}");
+    // TODO: make check time return image early instead of erroring
 
+    let mut img = rgb::texture_to_img(gpu, &texture)?;
     check_time(within_ms, start, "Face Detection")?;
 
     // TODO: make ops work on GPU
     // let mut ops: Vec<OperationTree> = Vec::new();
 
-    // for face in face_detection.faces {
+    // for face in detection.faces {
     //     let mouth = face.mouth;
     //     let l_eye = face.l_eye;
     //     let r_eye = face.r_eye;
     //     let nose = face.nose;
 
-    //     let copy: Operation = Copy::new(mouth.clone().into(), r_eye.into()).into();
-    //     ops.push(copy.into());
+    //     // let copy: Operation = Copy::new(mouth.clone().into(), r_eye.into()).into();
+    //     // ops.push(copy.into());
     //     // let scale: Operation = Scale::new(mouth.clone().into(), 3.).into();
     //     // ops.push(scale.into());
     //     // let swap: Operation = Swap::new(r_eye.clone().into(), l_eye.into()).into();
@@ -138,11 +137,11 @@ fn process_frame(
     //     // TODO: refactor op list execution to operate "chunkwise",
     //     // allowing time to be checked here before resuming
     //     check_time(within_ms, start, &format!("Image Manipulation {idx}"))?;
-    //     op.execute(gpu, img)?;
+    //     info!("Running op {:?}", op);
+    //     op.execute(gpu, &mut img)?;
     // }
 
-    // TODO: extract image as RgbA from texture and return it
-    Ok(input_img)
+    Ok(img)
 }
 
 fn check_time(within_ms: u32, start: Instant, waypoint: &str) -> Result<()> {

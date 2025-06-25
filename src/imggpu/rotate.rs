@@ -16,7 +16,7 @@ pub fn rotate(gpu: &mut GpuExecutor, img: &RgbImage, theta: f32, default: [f32; 
         mapped_at_creation: false,
     });
     let color_uniform = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("rotation_uniform"),
+        label: Some("color_uniform"),
         size: 16, // 4 f32s
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,

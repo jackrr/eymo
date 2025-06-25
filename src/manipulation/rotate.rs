@@ -2,7 +2,7 @@ use super::{util, Executable};
 use crate::shapes::{polygon::Polygon, rect::Rect, shape::Shape};
 use anyhow::Result;
 use image::RgbImage;
-use tracing::warn;
+use tracing::{span, warn, Level};
 
 #[derive(Debug, Clone)]
 pub struct Rotate {
@@ -21,6 +21,9 @@ impl Rotate {
 
 impl Executable for Rotate {
     fn execute(&self, img: &mut RgbImage) -> Result<()> {
+        let span = span!(Level::INFO, "Rotate#execute");
+        let _guard = span.enter();
+
         let src_img = util::image_at(self.target.clone().into(), img)?;
         let poly = Polygon::from(self.target.clone());
         let trans_x = poly.min_x();

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use image::{EncodableLayout, RgbaImage};
+use image::{EncodableLayout, RgbImage};
 use tracing::debug;
 
 use std::io::Write;
@@ -45,8 +45,8 @@ impl OutputVideoStream {
                 "-f",
                 "rawvideo",
                 "-pixel_format",
-                // "rgb24",
-                "rgba32",
+                "rgb24",
+                // "rgba32",
                 "-video_size",
                 &format!("{}x{}", width, height),
                 "-framerate",
@@ -64,9 +64,8 @@ impl OutputVideoStream {
         Ok(Self { ffplay })
     }
 
-    pub fn write_frame(&mut self, img: RgbaImage) -> Result<()> {
+    pub fn write_frame(&mut self, img: RgbImage) -> Result<()> {
         if let Some(stdin) = self.ffplay.stdin.as_mut() {
-            // FIXME: this aint workin
             stdin.write_all(img.as_bytes())?;
             stdin.flush()?;
         }

@@ -48,7 +48,9 @@ impl GpuExecutor {
         self.shaders.get(name).unwrap().clone()
     }
 
-    pub fn snapshot_texture(&self, tex: &wgpu::Texture, width: u32, height: u32, fname: &str) -> Result<()> {
+    pub fn snapshot_texture(&self, tex: &wgpu::Texture, fname: &str) -> Result<()> {
+        let width = tex.width();
+        let height = tex.height();
         let buffer_size = padded_bytes_per_row(width) as u64
             * height as u64
             * std::mem::size_of::<u8>() as u64;
@@ -266,6 +268,8 @@ impl GpuExecutor {
 
         self.queue.submit(std::iter::once(encoder.finish()));
 
+        let legacy_img_span = span!(Level::INFO, "legacy_img");
+        let _legacy_img_guard = legacy_img_span.enter();
         let buffer_slice = buffer.slice(..);
         buffer_slice.map_async(wgpu::MapMode::Read, |r| r.unwrap());
 

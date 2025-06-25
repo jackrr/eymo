@@ -28,18 +28,9 @@ pub enum Operation {
 }
 
 #[derive(Debug, Clone)]
-pub struct OperationTree {
-    op: Operation,
-    sub_ops: Vec<OperationTree>,
-}
-
-impl From<Operation> for OperationTree {
-    fn from(op: Operation) -> OperationTree {
-        OperationTree {
-            op,
-            sub_ops: Vec::new(),
-        }
-    }
+pub struct OpList {
+    shape: Shape,
+    ops: Vec<Operation>,
 }
 
 impl From<Copy> for Operation {
@@ -78,6 +69,7 @@ impl From<Tile> for Operation {
     }
 }
 
+// TODO: delete me
 trait Executable {
     fn execute(&self, img: &mut RgbImage) -> Result<()>;
 }
@@ -86,7 +78,7 @@ trait GpuExecutable {
     fn execute(&self, gpu: &mut GpuExecutor, img: &mut RgbImage) -> Result<()>;
 }
 
-impl OperationTree {
+impl OpList {
     pub fn execute(&self, gpu: &mut GpuExecutor, img: &mut RgbImage) -> Result<()> {
         match &self.op {
             Operation::Rotate(o) => {
@@ -107,11 +99,6 @@ impl OperationTree {
             Operation::Copy(c) => {
                 c.execute(gpu, img)?;
             }
-        }
-
-        for op in &self.sub_ops {
-            // TODO: scope to roi of self.operation
-            op.execute(gpu, img)?;
         }
 
         Ok(())

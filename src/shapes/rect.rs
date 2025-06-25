@@ -22,12 +22,15 @@ pub struct RectF32 {
 
 impl Into<Rect> for RectF32 {
     fn into(self) -> Rect {
-        Rect {
+        let mut r = Rect {
             x: self.x.round() as u32,
             y: self.y.round() as u32,
             w: self.w.round() as u32,
             h: self.h.round() as u32,
-        }
+        };
+
+        r.scale(1., r.right(), r.bottom());
+        r
     }
 }
 

@@ -7,6 +7,12 @@ pub enum Shape {
     Polygon(Polygon),
 }
 
+impl Default for Shape {
+    fn default() -> Self {
+        Shape::Rect(Rect::from_tl(0, 0, 1, 1))
+    }
+}
+
 impl From<Shape> for Rect {
     fn from(s: Shape) -> Rect {
         match s {
@@ -38,5 +44,14 @@ impl From<Polygon> for Shape {
 }
 
 impl Shape {
-    // common logic here
+    pub fn scale(&mut self, mag: f32, max_x: u32, max_y: u32) {
+        match self {
+            Shape::Polygon(p) => {
+                p.scale(mag, max_x, max_y);
+            }
+            Shape::Rect(r) => {
+                r.scale(mag, max_x, max_y);
+            }
+        };
+    }
 }

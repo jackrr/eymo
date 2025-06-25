@@ -1,24 +1,27 @@
 #![warn(unused_extern_crates)]
-
-use crate::manipulation::{Copy, Operation, OperationTree, Rotate, Scale, Swap, Tile};
 use crate::pipeline::Pipeline;
 use anyhow::{Error, Result};
 use clap::Parser;
-use image::{DynamicImage, RgbImage, RgbaImage};
+use image::{imageops, DynamicImage, Pixel, Rgb, RgbImage, RgbaImage};
+use imageproc::point::Point as ProcPoint;
 use imggpu::resize::GpuExecutor;
 use imggpu::rgb;
+use imggpu::vertex::Vertex;
 use nokhwa::pixel_format::RgbAFormat;
 use nokhwa::{Buffer, FormatDecoder};
 use num_cpus::get as get_cpu_count;
+use shapes::point::Point;
+use shapes::rect::Rect;
 use std::time::Instant;
 use tracing::{debug, error, info, span, trace, warn, Level};
 use tracing_subscriber::fmt;
 use tracing_subscriber::fmt::format::FmtSpan;
+use transform::Transform;
 use video::{create_input_stream, OutputVideoStream};
 mod imggpu;
-mod manipulation;
 mod pipeline;
 mod shapes;
+mod transform;
 mod video;
 
 #[derive(Parser, Debug)]
@@ -73,6 +76,8 @@ fn main() -> Result<()> {
             },
             Err(e) => error!("Failed to process frame: {e:?}"),
         }
+
+        break;
     }
 
     output_stream.close()?;
@@ -98,48 +103,66 @@ fn process_frame(
         frame.source_frame_format()
     );
     // TODO: can we get nokwha to give us rgba byte buffer to prevent need for decoding?
-    let input_img: RgbaImage = frame.decode_image::<RgbAFormat>()?;
-    // let input_img = image::open("./tmp/input_img.jpg")?;
-    // let input_img: RgbaImage = input_img.into();
+    // let input_img: RgbaImage = frame.decode_image::<RgbAFormat>()?;
+    let input_img = image::open("./tmp/input_img.jpg")?;
+    let input_img: RgbaImage = input_img.into();
     // DynamicImage::ImageRgba8(input_img.clone())
-    //     .to_rgb8()
+    // .to_rgb8()
     //     .save("tmp/input_img.jpg")?;
 
     let texture =
         gpu.rgba_buffer_to_texture(input_img.as_raw(), input_img.width(), input_img.height());
-
     let detection = pipeline.run_gpu(&texture, gpu)?;
-    // TODO: make check time return image early instead of erroring
 
-    let mut img = rgb::texture_to_img(gpu, &texture)?;
+    // TODO: make check time return image early instead of erroring
     check_time(within_ms, start, "Face Detection")?;
 
-    // TODO: make ops work on GPU
-    // let mut ops: Vec<OperationTree> = Vec::new();
+    let mut output = texture;
+    // let mut t = Transform::new(Rect::from_tl(100, 100, 400, 200));
+    // t.set_scale(1.2);
+    // output = t.execute(gpu, &output)?;
+    let mut tris: Vec<Vertex> = Vec::new();
+    let mut mouth_p: Vec<Point> = Vec::new();
 
-    // for face in detection.faces {
-    //     let mouth = face.mouth;
-    //     let l_eye = face.l_eye;
-    //     let r_eye = face.r_eye;
-    //     let nose = face.nose;
+    for face in detection.faces {
+        info!("Handling face {:?}", face);
+        // let mut t = Transform::new(face.mouth.clone());
+        tris = Vertex::triangles_for_shape(face.mouth.clone(), output.width(), output.height());
+        mouth_p = face.mouth.points.clone();
 
-    //     // let copy: Operation = Copy::new(mouth.clone().into(), r_eye.into()).into();
-    //     // ops.push(copy.into());
-    //     // let scale: Operation = Scale::new(mouth.clone().into(), 3.).into();
-    //     // ops.push(scale.into());
-    //     // let swap: Operation = Swap::new(r_eye.clone().into(), l_eye.into()).into();
-    //     // ops.push(swap.into());
-    //     let rotate: Operation = Rotate::new(mouth.into(), 45.).into();
-    //     ops.push(rotate.into());
+        // t.set_scale(2.);
+        // output = t.execute(gpu, &output)?;
+        check_time(within_ms, start, &format!("Image Manipulation TODO: index"))?;
+        break;
+    }
+
+    let mut img = rgb::texture_to_img(gpu, &output)?;
+    let pts = mouth_p
+        .iter()
+        .map(|p| ProcPoint::new(p.x as i32, p.y as i32))
+        .collect::<Vec<_>>();
+    img = imageproc::drawing::draw_polygon(&img, &pts, Rgb::from([255u8, 255u8, 0u8]));
+
+    // for i in 0..tris.len() / 3 {
+    //     let idx = i * 3;
+    //     img = imageproc::drawing::draw_polygon(
+    //         &img,
+    //         &[
+    //             ProcPoint::new(tris[idx].tex_coord[0] as i32, tris[idx].tex_coord[1] as i32),
+    //             ProcPoint::new(
+    //                 tris[idx + 1].tex_coord[0] as i32,
+    //                 tris[idx + 1].tex_coord[1] as i32,
+    //             ),
+    //             // ProcPoint::new(
+    //             //     tris[idx + 2].tex_coord[0] as i32,
+    //             //     tris[idx + 2].tex_coord[1] as i32,
+    //             // ),
+    //         ],
+    //         Rgb::from([255u8, 255u8, 0u8]),
+    //     );
     // }
 
-    // for (idx, op) in ops.iter().enumerate() {
-    //     // TODO: refactor op list execution to operate "chunkwise",
-    //     // allowing time to be checked here before resuming
-    //     check_time(within_ms, start, &format!("Image Manipulation {idx}"))?;
-    //     info!("Running op {:?}", op);
-    //     op.execute(gpu, &mut img)?;
-    // }
+    img.save("tmp/transformed.jpg")?;
 
     Ok(img)
 }

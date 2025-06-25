@@ -4,7 +4,7 @@ use crate::shapes::shape::Shape;
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable, PartialEq)]
 pub struct Vertex {
     position: [f32; 2],
-    tex_coord: [f32; 2],
+    pub tex_coord: [f32; 2],
 }
 
 impl Vertex {
@@ -65,7 +65,7 @@ impl Vertex {
         // cast y val to clip space, including inverting axis
         let clip_y = |y: u32| 1. - y as f32 / world_height as f32 * 2.;
 
-        let base_vertices = match s.into() {
+        let vertices = match s.into() {
             Shape::Polygon(p) => {
                 let mut clockwise = p
                     .points
@@ -89,19 +89,23 @@ impl Vertex {
             }
         };
 
-        let mut needed = base_vertices.len() - 2;
+        Self::to_triangles(vertices)
+    }
+
+    pub fn to_triangles(list: Vec<Self>) -> Vec<Self> {
+        let mut needed = list.len() - 2;
         let mut out_vert = Vec::new();
         let mut cur_idx = 0;
         while needed > 0 {
             for i in 0..3 {
                 let idx = cur_idx + i;
-                let idx = if idx < base_vertices.len() {
+                let idx = if idx < list.len() {
                     idx
                 } else {
                     // use only even vertices on 2nd pass
-                    idx % base_vertices.len() * 2
+                    (idx * 2) % list.len()
                 };
-                out_vert.push(base_vertices[idx].clone());
+                out_vert.push(list[idx].clone());
             }
             // walking even vertices
             cur_idx += 2;

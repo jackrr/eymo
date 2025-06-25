@@ -16,6 +16,9 @@ meta:
 clear -> clear all active manipulations
 clear X -> clear manipulation with label X
 
+# shape-first lang
+mouth->rotate(45), swap(leye), flip(VERT) # perform all ops in any order
+mouth->scale(2)->swap(leye) # scale mouth, then swap
 
 # englishish
 A(copy mouth to nose then rotate 45)

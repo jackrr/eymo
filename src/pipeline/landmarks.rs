@@ -9,7 +9,7 @@ use crate::shapes::polygon::Polygon;
 use crate::shapes::rect::Rect;
 use anyhow::Result;
 use ort::session::SessionOutputs;
-use tracing::{span, Level};
+use tracing::{info, span, Level};
 use wgpu::util::DeviceExt;
 
 pub struct FaceLandmarker {
@@ -152,6 +152,7 @@ impl FaceLandmarker {
         let left = bounds.left() as f32 / tex.width() as f32;
         let top = bounds.top() as f32 / tex.height() as f32;
         let bottom = bounds.bottom() as f32 / tex.height() as f32;
+        info!("{left},{top}->{right},{bottom}");
         let vertices = Vec::from([
             Vertex::new_with_tex(&[1., 1.], &[right, top]),
             Vertex::new_with_tex(&[-1., 1.], &[left, top]),
@@ -192,7 +193,7 @@ impl FaceLandmarker {
         let tensor =
             imggpu::rgb::texture_to_tensor(gpu, &output_tex, imggpu::rgb::OutputRange::ZeroToOne)?;
         let outputs = self.model.run(ort::inputs!["input_1" => tensor]?)?;
-        extract_results(outputs, tex.width(), tex.height(), bounds, theta)
+        extract_results(outputs, WIDTH, HEIGHT, bounds, -theta)
     }
 }
 

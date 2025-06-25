@@ -265,7 +265,7 @@ impl Transform {
         Ok(output_tex)
     }
 
-    fn vertices(&self, width: u32, height: u32) -> Vec<Vertex> {
+    pub fn vertices(&self, width: u32, height: u32) -> Vec<Vertex> {
         let make_vtx = |x: u32, y: u32| {
             let x = x as f32 / width as f32;
             let y = y as f32 / height as f32;
@@ -282,7 +282,8 @@ impl Transform {
             // tex coords are points we are reading _from_
             // vertex coords are clip-spaced of where we are writing _to_
             // output, input
-            Vertex::new_with_tex(&[clip_x, clip_y], &[x as f32, y as f32])
+            // FIXME whytf is x/y always 0
+            Vertex::new_with_tex(&[clip_x, clip_y], &[x, y])
         };
 
         let shape = self.shape.clone();

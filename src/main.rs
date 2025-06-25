@@ -106,9 +106,6 @@ fn process_frame(
     // let input_img: RgbaImage = frame.decode_image::<RgbAFormat>()?;
     let input_img = image::open("./tmp/input_img.jpg")?;
     let input_img: RgbaImage = input_img.into();
-    // DynamicImage::ImageRgba8(input_img.clone())
-    // .to_rgb8()
-    //     .save("tmp/input_img.jpg")?;
 
     let texture =
         gpu.rgba_buffer_to_texture(input_img.as_raw(), input_img.width(), input_img.height());
@@ -123,12 +120,16 @@ fn process_frame(
     // output = t.execute(gpu, &output)?;
     let mut tris: Vec<Vertex> = Vec::new();
     let mut mouth_p: Vec<Point> = Vec::new();
+    let mut leye_p: Vec<Point> = Vec::new();
+    let mut reye_p: Vec<Point> = Vec::new();
 
     for face in detection.faces {
-        info!("Handling face {:?}", face);
-        // let mut t = Transform::new(face.mouth.clone());
-        tris = Vertex::triangles_for_shape(face.mouth.clone(), output.width(), output.height());
+        trace!("Handling face {:?}", face);
+        let mut t = Transform::new(face.mouth.clone());
+        tris = t.vertices(output.width(), output.height());
         mouth_p = face.mouth.points.clone();
+        leye_p = face.l_eye.points.clone();
+        reye_p = face.r_eye.points.clone();
 
         // t.set_scale(2.);
         // output = t.execute(gpu, &output)?;
@@ -137,30 +138,44 @@ fn process_frame(
     }
 
     let mut img = rgb::texture_to_img(gpu, &output)?;
-    let pts = mouth_p
-        .iter()
-        .map(|p| ProcPoint::new(p.x as i32, p.y as i32))
-        .collect::<Vec<_>>();
-    img = imageproc::drawing::draw_polygon(&img, &pts, Rgb::from([255u8, 255u8, 0u8]));
+    // let pts = mouth_p
+    //     .iter()
+    //     .map(|p| ProcPoint::new(p.x as i32, p.y as i32))
+    //     .collect::<Vec<_>>();
+    // img = imageproc::drawing::draw_polygon(&img, &pts, Rgb::from([255u8, 255u8, 0u8]));
+    // let pts = leye_p
+    //     .iter()
+    //     .map(|p| ProcPoint::new(p.x as i32, p.y as i32))
+    //     .collect::<Vec<_>>();
+    // img = imageproc::drawing::draw_polygon(&img, &pts, Rgb::from([255u8, 0u8, 0u8]));
+    // let pts = reye_p
+    //     .iter()
+    //     .map(|p| ProcPoint::new(p.x as i32, p.y as i32))
+    //     .collect::<Vec<_>>();
+    // img = imageproc::drawing::draw_polygon(&img, &pts, Rgb::from([0u8, 255u8, 0u8]));
 
-    // for i in 0..tris.len() / 3 {
-    //     let idx = i * 3;
-    //     img = imageproc::drawing::draw_polygon(
-    //         &img,
-    //         &[
-    //             ProcPoint::new(tris[idx].tex_coord[0] as i32, tris[idx].tex_coord[1] as i32),
-    //             ProcPoint::new(
-    //                 tris[idx + 1].tex_coord[0] as i32,
-    //                 tris[idx + 1].tex_coord[1] as i32,
-    //             ),
-    //             // ProcPoint::new(
-    //             //     tris[idx + 2].tex_coord[0] as i32,
-    //             //     tris[idx + 2].tex_coord[1] as i32,
-    //             // ),
-    //         ],
-    //         Rgb::from([255u8, 255u8, 0u8]),
-    //     );
-    // }
+    let width = img.width() as f32;
+    let height = img.height() as f32;
+    info!("{tris:?}");
+    for i in 0..tris.len() / 3 {
+        let idx = i * 3;
+        let points = [
+            ProcPoint::new(
+                (tris[idx].tex_coord[0] * width) as i32,
+                (tris[idx].tex_coord[1] * height) as i32,
+            ),
+            ProcPoint::new(
+                (tris[idx + 1].tex_coord[0] * width) as i32,
+                (tris[idx + 1].tex_coord[1] * height) as i32,
+            ),
+            ProcPoint::new(
+                (tris[idx + 2].tex_coord[0] * width) as i32,
+                (tris[idx + 2].tex_coord[1] * height) as i32,
+            ),
+        ];
+        info!("POINTS: {points:?}");
+        img = imageproc::drawing::draw_polygon(&img, &points, Rgb::from([255u8, 255u8, 0u8]));
+    }
 
     img.save("tmp/transformed.jpg")?;
 

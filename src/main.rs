@@ -22,6 +22,7 @@ mod imggpu;
 mod pipeline;
 mod shapes;
 mod transform;
+mod triangulate;
 mod video;
 
 #[derive(Parser, Debug)]

@@ -689,6 +689,7 @@ dependencies = [
  "num_cpus",
  "ort",
  "pollster",
+ "robust",
  "tracing",
  "tracing-subscriber",
  "wgpu",
@@ -2262,6 +2263,12 @@ dependencies = [
  "untrusted",
  "windows-sys 0.52.0",
 ]
+
+[[package]]
+name = "robust"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e27ee8bb91ca0adcf0ecb116293afa12d393f9c2b9b9cd54d33e8078fe19839"
 
 [[package]]
 name = "rustc-hash"

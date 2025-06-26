@@ -3,7 +3,7 @@ use crate::shapes::shape::Shape;
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable, PartialEq)]
 pub struct Vertex {
-    position: [f32; 2],
+    pub position: [f32; 2],
     pub tex_coord: [f32; 2],
 }
 
@@ -33,6 +33,14 @@ impl Vertex {
             position: coord.clone(),
             tex_coord: tex_coord.clone(),
         }
+    }
+
+    pub fn x(&self) -> f32 {
+        self.postion[0]
+    }
+
+    pub fn y(&self) -> f32 {
+        self.postion[1]
     }
 
     pub fn triangles_for_full_coverage() -> Vec<Self> {

@@ -66,7 +66,7 @@ impl Vertex {
         s: impl Into<Shape>,
         world_width: u32,
         world_height: u32,
-    ) -> (Vec<Self>, Vec<Self>) {
+    ) -> Vec<Self> {
         // cast x val to clip space
         let clip_x = |x: u32| x as f32 / world_width as f32 * 2. - 1.;
 
@@ -100,11 +100,8 @@ impl Vertex {
         Self::to_triangles(vertices)
     }
 
-    // TODO: stop returning hull
-    pub fn to_triangles(list: Vec<Self>) -> (Vec<Self>, Vec<Self>) {
-        let mut algo = Delaunator::new(list);
-        let res = algo.triangulate();
-        (res, algo.hull)
+    pub fn to_triangles(list: Vec<Self>) -> Vec<Self> {
+        Delaunator::new(list).triangulate()
     }
 }
 

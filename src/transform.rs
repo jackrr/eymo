@@ -211,7 +211,7 @@ impl Transform {
                 label: Some("encoder"),
             });
 
-        let (vertices, _) = self.vertices(tex.width(), tex.height());
+        let vertices = self.vertices(tex.width(), tex.height());
 
         let vertex_buffer = gpu
             .device
@@ -265,7 +265,7 @@ impl Transform {
         Ok(output_tex)
     }
 
-    pub fn vertices(&self, width: u32, height: u32) -> (Vec<Vertex>, Vec<Vertex>) {
+    pub fn vertices(&self, width: u32, height: u32) -> Vec<Vertex> {
         let make_vtx = |x: u32, y: u32| {
             let x = x as f32 / width as f32;
             let y = y as f32 / height as f32;
@@ -288,15 +288,11 @@ impl Transform {
 
         let shape = self.shape.clone();
         let vertices = match shape {
-            Shape::Polygon(p) => {
-                let mut clockwise = p
-                    .points
-                    .iter()
-                    .map(|p| make_vtx(p.x, p.y))
-                    .collect::<Vec<_>>();
-                // clockwise.reverse();
-                clockwise
-            }
+            Shape::Polygon(p) => p
+                .points
+                .iter()
+                .map(|p| make_vtx(p.x, p.y))
+                .collect::<Vec<_>>(),
             Shape::Rect(sr) => {
                 let r = sr.right();
                 let l = sr.left();

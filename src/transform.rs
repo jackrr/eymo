@@ -211,7 +211,7 @@ impl Transform {
                 label: Some("encoder"),
             });
 
-        let vertices = self.vertices(tex.width(), tex.height());
+        let (vertices, _) = self.vertices(tex.width(), tex.height());
 
         let vertex_buffer = gpu
             .device
@@ -265,7 +265,7 @@ impl Transform {
         Ok(output_tex)
     }
 
-    pub fn vertices(&self, width: u32, height: u32) -> Vec<Vertex> {
+    pub fn vertices(&self, width: u32, height: u32) -> (Vec<Vertex>, Vec<Vertex>) {
         let make_vtx = |x: u32, y: u32| {
             let x = x as f32 / width as f32;
             let y = y as f32 / height as f32;

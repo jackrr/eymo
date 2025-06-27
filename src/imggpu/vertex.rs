@@ -66,7 +66,7 @@ impl Vertex {
         s: impl Into<Shape>,
         world_width: u32,
         world_height: u32,
-    ) -> Vec<Self> {
+    ) -> (Vec<Self>, Vec<Self>) {
         // cast x val to clip space
         let clip_x = |x: u32| x as f32 / world_width as f32 * 2. - 1.;
 
@@ -100,28 +100,11 @@ impl Vertex {
         Self::to_triangles(vertices)
     }
 
-    pub fn to_triangles(list: Vec<Self>) -> Vec<Self> {
-        Delaunator::new(list).triangulate()
-        // let mut needed = list.len() - 2;
-        // let mut out_vert = Vec::new();
-        // let mut cur_idx = 0;
-        // while needed > 0 {
-        //     for i in 0..3 {
-        //         let idx = cur_idx + i;
-        //         let idx = if idx < list.len() {
-        //             idx
-        //         } else {
-        //             // use only even vertices on 2nd pass
-        //             (idx * 2) % list.len()
-        //         };
-        //         out_vert.push(list[idx].clone());
-        //     }
-        //     // walking even vertices
-        //     cur_idx += 2;
-        //     needed -= 1;
-        // }
-
-        // out_vert
+    // TODO: stop returning hull
+    pub fn to_triangles(list: Vec<Self>) -> (Vec<Self>, Vec<Self>) {
+        let mut algo = Delaunator::new(list);
+        let res = algo.triangulate();
+        (res, algo.hull)
     }
 }
 

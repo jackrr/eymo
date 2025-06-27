@@ -120,6 +120,8 @@ fn process_frame(
     // t.set_scale(1.2);
     // output = t.execute(gpu, &output)?;
     let mut mouth_tris: Vec<Vertex> = Vec::new();
+    let mut mouth_hull: Vec<Vertex> = Vec::new();
+    let mut _bl: Vec<Vertex> = Vec::new();
     let mut leye_tris: Vec<Vertex> = Vec::new();
     let mut reye_tris: Vec<Vertex> = Vec::new();
     let mut mouth_p: Vec<Point> = Vec::new();
@@ -129,18 +131,15 @@ fn process_frame(
     for face in detection.faces {
         trace!("Handling face {:?}", face);
         let mut t = Transform::new(face.mouth.clone());
-        mouth_tris = t.vertices(output.width(), output.height());
+        (mouth_tris, mouth_hull) = t.vertices(output.width(), output.height());
         mouth_p = face.mouth.points.clone();
         leye_p = face.l_eye.points.clone();
         reye_p = face.r_eye.points.clone();
 
         let mut t = Transform::new(face.l_eye.clone());
-        leye_tris = t.vertices(output.width(), output.height());
+        (leye_tris, _bl) = t.vertices(output.width(), output.height());
         let mut t = Transform::new(face.r_eye.clone());
-        reye_tris = t.vertices(output.width(), output.height());
-        t.set_scale(2.);
-        output = t.execute(gpu, &output)?;
-
+        (reye_tris, _bl) = t.vertices(output.width(), output.height());
         // t.set_scale(2.);
         // output = t.execute(gpu, &output)?;
         check_time(within_ms, start, &format!("Image Manipulation TODO: index"))?;
@@ -163,17 +162,37 @@ fn process_frame(
     //     .map(|p| ProcPoint::new(p.x as i32, p.y as i32))
     //     .collect::<Vec<_>>();
     // img = imageproc::drawing::draw_polygon(&img, &pts, Rgb::from([0u8, 255u8, 0u8]));
-
-    img = draw_tris(mouth_tris, img, Rgb::from([255u8, 0u8, 0u8]));
-    img = draw_tris(leye_tris, img, Rgb::from([255u8, 255u8, 0u8]));
-    // img = draw_tris(reye_tris, img, Rgb::from([0u8, 255u8, 0u8]));
+    img = draw_tris(mouth_tris, img);
+    img = draw_tris(leye_tris, img);
+    img = draw_tris(reye_tris, img);
+    img = draw_hull(mouth_hull, img, Rgb::from([0u8, 0u8, 255u8]));
 
     img.save("tmp/transformed.jpg")?;
 
     Ok(img)
 }
 
-fn draw_tris(tris: Vec<Vertex>, img: RgbImage, color: Rgb<u8>) -> RgbImage {
+fn draw_hull(hull: Vec<Vertex>, img: RgbImage, color: Rgb<u8>) -> RgbImage {
+    println!("HULL {hull:?}");
+    let width = img.width() as f32;
+    let height = img.height() as f32;
+
+    let mut img = img;
+    let mut prev = hull[hull.len() - 1];
+    for v in hull {
+        img = imageproc::drawing::draw_line_segment(
+            &img,
+            (prev.tex_coord[0] * width, prev.tex_coord[1] * height),
+            (v.tex_coord[0] * width, v.tex_coord[1] * height),
+            color,
+        );
+        prev = v;
+    }
+
+    img
+}
+
+fn draw_tris(tris: Vec<Vertex>, img: RgbImage) -> RgbImage {
     let mut img = img;
     let width = img.width() as f32;
     let height = img.height() as f32;
@@ -195,6 +214,8 @@ fn draw_tris(tris: Vec<Vertex>, img: RgbImage, color: Rgb<u8>) -> RgbImage {
             ),
         ];
         info!("POINTS: {points:?}");
+        let r = 55 + ((i * 40) % 200);
+        let color = Rgb::from([r as u8, 0u8, 0u8]);
         img = imageproc::drawing::draw_polygon(&img, &points, color);
     }
 

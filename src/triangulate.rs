@@ -33,6 +33,7 @@ pub struct Delaunator {
     triangle_len: usize,
     hull_start: usize,
     hash_size: usize,
+    pub hull: Vec<Vertex>,
     edge_stack: [usize; 512],
 }
 
@@ -56,6 +57,7 @@ impl Delaunator {
             triangle_len: 0,
             hull_start: 0,
             edge_stack: [0; 512],
+            hull: Vec::new(),
         }
     }
 
@@ -181,16 +183,17 @@ impl Delaunator {
                 }
             }
 
-            // TODO:: WTF is this even resulting in?
             return Vec::new();
         }
 
         // swap the order of the seed points for counter-clockwise orientation
         if orient2d(&v0, &v1, &v2) < 0. {
-            let tmp = v0;
-            v0 = v1;
+            let tmp = v1;
+            let tmp_idx = v1_idx;
             v1 = v2;
+            v1_idx = v2_idx;
             v2 = tmp;
+            v2_idx = tmp_idx;
         }
 
         let center = circumcenter(&v0, &v1, &v2);
@@ -319,6 +322,13 @@ impl Delaunator {
             // save the two new edges in the hash table
             hull_hash[self.hash_key(&v, &c)] = i as i32;
             hull_hash[self.hash_key(&self.points[e], &c)] = e as i32;
+        }
+
+        self.hull = Vec::new();
+        let mut e = self.hull_start;
+        for _ in 0..hull_size {
+            self.hull.push(self.points[e].clone());
+            e = hull_next[e];
         }
 
         self.triangles[..self.triangle_len]

@@ -295,7 +295,7 @@ impl Delaunator {
                 hull_next[n] = n; // mark as removed
                 hull_size -= 1;
                 n = q;
-                q = hull_next[n]; // TODO: is this right?
+                q = hull_next[n];
             }
 
             // walk backward from the other side, adding more triangles and flipping
@@ -308,7 +308,7 @@ impl Delaunator {
                     hull_next[e] = e; // mark as removed
                     hull_size -= 1;
                     e = q;
-                    q = hull_prev[e]; // TODO: is this right?
+                    q = hull_prev[e];
                 }
             }
 

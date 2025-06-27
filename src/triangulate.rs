@@ -1,6 +1,7 @@
 use core::f32;
 
 use crate::imggpu::vertex::Vertex;
+use tracing::{span, Level};
 
 /*
 ISC License
@@ -27,45 +28,57 @@ This is a port of Mapbox's Delauney triangulation algorithm to rust.
  */
 pub struct Delaunator {
     points: Vec<Vertex>,
-    edge_stack: Vec<u32>,
     triangles: Vec<usize>,
-    hash_size: usize,
-    hull_prev: Vec<usize>,
-    hull_next: Vec<usize>,
-    hull_tri: Vec<u32>,
     half_edges: Vec<i32>,
-    hull_hash: Vec<i32>,
-    hull: Vec<usize>,
-    ids: Vec<usize>,
-    dists: Vec<f32>,
+    triangle_len: usize,
+    hull_start: usize,
+    hash_size: usize,
+    edge_stack: [usize; 512],
 }
 
 impl Delaunator {
     pub fn new(points: Vec<Vertex>) -> Self {
-        let n = (points.len() >> 1) as f32;
+        let n = (points.len() * 2) >> 1;
+        let max_triangles = (((2 * n) as i32) - 5).max(0);
+        let mut half_edges = Vec::new();
+        let mut triangles = Vec::new();
+
+        for _ in 0..(max_triangles * 3) {
+            half_edges.push(0);
+            triangles.push(0);
+        }
+
         Self {
             points,
-            edge_stack: Vec::new(),
-            hash_size: n.sqrt().ceil() as usize,
-            triangles: Vec::new(),
-            half_edges: Vec::new(),
-            hull_prev: Vec::new(),
-            hull_next: Vec::new(),
-            hull_tri: Vec::new(),
-            hull_hash: Vec::new(),
-            hull: Vec::new(),
-            ids: Vec::new(),
-            dists: Vec::new(),
+            triangles,
+            half_edges,
+            hash_size: (n as f32).sqrt().ceil() as usize,
+            triangle_len: 0,
+            hull_start: 0,
+            edge_stack: [0; 512],
         }
     }
 
-    pub fn triangulate(&mut self) {
-        let n = self.points.len() >> 1;
+    pub fn triangulate(&mut self) -> Vec<Vertex> {
+        // FIXME why is right half of mouth missing?
+        let span = span!(Level::INFO, "triangulate");
+        let _guard = span.enter();
+
+        let n = (self.points.len() * 2) >> 1;
 
         let mut min_x = f32::MAX;
         let mut min_y = f32::MAX;
-        let mut max_x = -f32::MIN;
-        let mut max_y = -f32::MIN;
+        let mut max_x = f32::MIN;
+        let mut max_y = f32::MIN;
+
+        let mut hull = Vec::with_capacity(n);
+        let mut ids = Vec::with_capacity(n);
+        let mut dists = Vec::with_capacity(n);
+        let mut hull_prev = Vec::with_capacity(n);
+        let mut hull_next = Vec::with_capacity(n);
+        let mut hull_hash = Vec::with_capacity(n);
+        let mut hull_tri: Vec<usize> = Vec::with_capacity(n);
+        // let mut hull = Vec::new();
 
         for i in 0..n {
             let x = self.points[i].x();
@@ -83,7 +96,13 @@ impl Delaunator {
             if y > max_y {
                 max_y = y;
             }
-            self.ids[i] = i;
+            ids.push(i);
+            dists.push(0.);
+            hull.push(0);
+            hull_prev.push(0);
+            hull_next.push(0);
+            hull_hash.push(0);
+            hull_tri.push(0);
         }
 
         let cx = (min_x + max_x) / 2.;
@@ -144,43 +163,30 @@ impl Delaunator {
             let first_point = &self.points[0];
             for (i, v) in self.points.iter().enumerate() {
                 let dx = v.x() - first_point.x();
-                self.dists[i] = if dx != 0. {
+                dists[i] = if dx != 0. {
                     dx
                 } else {
                     v.y() - first_point.y()
                 }
             }
 
-            quicksort(&mut self.ids, &mut self.dists, 0, n - 1);
+            quicksort(&mut ids, &mut dists, 0, n - 1);
             let mut d0 = f32::MIN;
             for i in 0..n {
-                let id = self.ids[i];
-                let d = self.dists[id];
+                let id = ids[i];
+                let d = dists[id];
                 if d > d0 {
-                    self.hull.push(id);
+                    hull.push(id);
                     d0 = d;
                 }
             }
 
-            return;
+            // TODO:: WTF is this even resulting in?
+            return Vec::new();
         }
 
         // swap the order of the seed points for counter-clockwise orientation
-        if robust::orient2d(
-            robust::Coord {
-                x: v0.x(),
-                y: v0.y(),
-            },
-            robust::Coord {
-                x: v1.x(),
-                y: v1.y(),
-            },
-            robust::Coord {
-                x: v2.x(),
-                y: v2.y(),
-            },
-        ) < 0.
-        {
+        if orient2d(&v0, &v1, &v2) < 0. {
             let tmp = v0;
             v0 = v1;
             v1 = v2;
@@ -189,46 +195,136 @@ impl Delaunator {
 
         let center = circumcenter(&v0, &v1, &v2);
 
-        for (i, v) in self.points.iter().enumerate() {
-            self.dists[i] = dist(v, &center);
+        for i in 0..n {
+            dists[i] = dist(&self.points[i], &center);
         }
 
         // sort the points by distance from the seed triangle circumcenter
-        quicksort(&mut self.ids, &mut self.dists, 0, n - 1);
-        let hull_start = v0_idx;
-        let hull_size = 3;
+        quicksort(&mut ids, &mut dists, 0, n - 1);
 
-        self.hull_prev[v2_idx] = v1_idx;
-        self.hull_next[v0_idx] = v1_idx;
+        self.hull_start = v0_idx;
+        let mut hull_size = 3;
 
-        self.hull_prev[v0_idx] = v2_idx;
-        self.hull_next[v1_idx] = v2_idx;
+        hull_prev[v2_idx] = v1_idx;
+        hull_next[v0_idx] = v1_idx;
 
-        self.hull_prev[v1_idx] = v0_idx;
-        self.hull_next[v2_idx] = v0_idx;
+        hull_prev[v0_idx] = v2_idx;
+        hull_next[v1_idx] = v2_idx;
 
-        self.hull_tri[v0_idx] = 0;
-        self.hull_tri[v1_idx] = 1;
-        self.hull_tri[v2_idx] = 2;
+        hull_prev[v1_idx] = v0_idx;
+        hull_next[v2_idx] = v0_idx;
+
+        hull_tri[v0_idx] = 0;
+        hull_tri[v1_idx] = 1;
+        hull_tri[v2_idx] = 2;
 
         for _ in 0..n {
-            self.hull_hash.push(-1);
+            hull_hash.push(-1);
         }
 
         let key = self.hash_key(&v0, &center);
-        self.hull_hash[key] = v0_idx as i32;
+        hull_hash[key] = v0_idx as i32;
         let key = self.hash_key(&v1, &center);
-        self.hull_hash[key] = v1_idx as i32;
+        hull_hash[key] = v1_idx as i32;
         let key = self.hash_key(&v2, &center);
-        self.hull_hash[key] = v2_idx as i32;
+        hull_hash[key] = v2_idx as i32;
 
-        let mut triangle_len = 0;
-        triangle_len = self.add_triangle(triangle_len, v0_idx, v1_idx, v2_idx, -1, -1, -1);
+        self.add_triangle(v0_idx, v1_idx, v2_idx, -1, -1, -1);
 
-        for k in 0..self.ids.len() {
-            let i = self.ids[k];
+        let mut xp = 0.;
+        let mut yp = 0.;
+        'id_iter: for k in 0..ids.len() {
+            let i = ids[k];
             let v = self.points[i];
+            let x = v.x();
+            let y = v.y();
+
+            // skip near-duplicate points
+            if k > 0 && (x - xp).abs() <= f32::EPSILON && (y - yp).abs() <= f32::EPSILON {
+                continue;
+            }
+            xp = x;
+            yp = y;
+
+            // skip seed triangle points
+            if i == v0_idx || i == v1_idx || i == v2_idx {
+                continue;
+            }
+
+            // find a visible edge on the convex hull using edge hash
+            let mut start = 0;
+            let key = self.hash_key(&v, &center);
+            for j in 0..self.hash_size {
+                start = hull_hash[(key + j) % self.hash_size];
+                if start != -1 && start as usize != hull_next[start as usize] {
+                    break;
+                }
+            }
+
+            start = hull_prev[start as usize] as i32;
+            let mut e = start as usize;
+            loop {
+                let q = hull_next[e];
+                if orient2d(&v, &self.points[e], &self.points[q]) < 0. {
+                    break;
+                }
+                e = q;
+                if e == start as usize {
+                    // likely a near-duplicate point; skip it
+                    break 'id_iter;
+                }
+            }
+
+            // add the first triangle from the point
+            let mut t = self.add_triangle(e, i, hull_next[e], -1, -1, hull_tri[e] as i32);
+
+            // recursively flip triangles from the point until they satisfy the Delaunay condition
+            hull_tri[i] = self.legalize(t + 2, &mut hull_tri, &mut hull_prev);
+            hull_tri[e] = t; // keep track of boundary triangles on the hull
+            hull_size += 1;
+
+            // walk forward through the hull, adding more triangles and flipping recursively
+            let mut n = hull_next[e];
+            let mut q = hull_next[n];
+            while orient2d(&v, &self.points[n], &self.points[q]) < 0. {
+                t = self.add_triangle(n, i, q, hull_tri[i] as i32, -1, hull_tri[n] as i32);
+                hull_tri[i] = self.legalize(t + 2, &mut hull_tri, &mut hull_prev);
+                hull_next[n] = n; // mark as removed
+                hull_size -= 1;
+                n = q;
+                q = hull_next[n]; // TODO: is this right?
+            }
+
+            // walk backward from the other side, adding more triangles and flipping
+            if e as i32 == start {
+                q = hull_prev[e];
+                while orient2d(&v, &self.points[q], &self.points[e]) < 0. {
+                    t = self.add_triangle(q, i, e, -1, hull_tri[e] as i32, hull_tri[q] as i32);
+                    self.legalize(t + 2, &mut hull_tri, &mut hull_prev);
+                    hull_tri[q] = t;
+                    hull_next[e] = e; // mark as removed
+                    hull_size -= 1;
+                    e = q;
+                    q = hull_prev[e]; // TODO: is this right?
+                }
+            }
+
+            // update the hull indices
+            hull_prev[i] = e;
+            self.hull_start = e;
+            hull_prev[n] = i;
+            hull_next[e] = i;
+            hull_next[i] = n;
+
+            // save the two new edges in the hash table
+            hull_hash[self.hash_key(&v, &c)] = i as i32;
+            hull_hash[self.hash_key(&self.points[e], &c)] = e as i32;
         }
+
+        self.triangles[..self.triangle_len]
+            .iter()
+            .map(|idx| self.points[*idx].clone())
+            .collect::<Vec<_>>()
     }
 
     fn hash_key(&self, v: &Vertex, c: &Vertex) -> usize {
@@ -236,17 +332,111 @@ impl Delaunator {
             % self.hash_size
     }
 
-    // add a new triangle given vertex indices and adjacent half-edge ids
-    fn add_triangle(
+    fn legalize(
         &mut self,
-        t: usize,
-        i0: usize,
-        i1: usize,
-        i2: usize,
-        a: i32,
-        b: i32,
-        c: i32,
+        a: usize,
+        hull_tri: &mut Vec<usize>,
+        hull_prev: &mut Vec<usize>,
     ) -> usize {
+        let mut a = a;
+        let mut i = 0;
+        // #[ignore(unused_assignments)]
+        let mut ar = 0;
+
+        loop {
+            let b = self.half_edges[a];
+
+            /* if the pair of triangles doesn't satisfy the Delaunay condition
+             * (p1 is inside the circumcircle of [p0, pl, pr]), flip them,
+             * then do the same check/flip recursively for the new pair of triangles
+             *
+             *           pl                    pl
+             *          /||\                  /  \
+             *       al/ || \bl            al/    \a
+             *        /  ||  \              /      \
+             *       /  a||b  \    flip    /___ar___\
+             *     p0\   ||   /p1   =>   p0\---bl---/p1
+             *        \  ||  /              \      /
+             *       ar\ || /br             b\    /br
+             *          \||/                  \  /
+             *           pr                    pr
+             */
+            let a0 = a - a % 3;
+            ar = a0 + (a + 2) % 3;
+
+            if b == -1 {
+                // convex hull edge
+                if i == 0 {
+                    break;
+                }
+                i -= 1;
+                a = self.edge_stack[i];
+                continue;
+            }
+
+            let b0 = b - b % 3;
+            let al = a0 + (a + 1) % 3;
+            let bl = (b0 + (b + 2) % 3) as usize;
+
+            let p0 = self.triangles[ar];
+            let pr = self.triangles[a];
+            let pl = self.triangles[al];
+            let p1 = self.triangles[bl];
+
+            let illegal = incircle(
+                &self.points[p0],
+                &self.points[pr],
+                &self.points[pl],
+                &self.points[p1],
+            );
+
+            if illegal {
+                self.triangles[a] = p1;
+                self.triangles[b as usize] = p0;
+
+                let hbl = self.half_edges[bl];
+
+                // edge swapped on the other side of the hull (rare); fix the halfedge reference
+                if hbl == -1 {
+                    let mut e = self.hull_start;
+                    loop {
+                        if hull_tri[e] == bl {
+                            hull_tri[e] = a;
+                            break;
+                        }
+                        e = hull_prev[e];
+                        if e == self.hull_start {
+                            break;
+                        }
+                    }
+                }
+
+                self.link(a as i32, hbl);
+                self.link(b, self.half_edges[ar]);
+                self.link(ar as i32, bl as i32);
+
+                let br = b0 + (b + 1) % 3;
+
+                // don't worry about hitting the cap: it can only happen on extremely degenerate input
+                if i < self.edge_stack.len() {
+                    self.edge_stack[i] = br as usize;
+                    i += 1;
+                }
+            } else {
+                if i == 0 {
+                    break;
+                }
+                i -= 1;
+                a = self.edge_stack[i];
+            }
+        }
+        return ar;
+    }
+
+    // add a new triangle given vertex indices and adjacent half-edge ids
+    fn add_triangle(&mut self, i0: usize, i1: usize, i2: usize, a: i32, b: i32, c: i32) -> usize {
+        let t = self.triangle_len;
+
         self.triangles[t] = i0;
         self.triangles[t + 1] = i1;
         self.triangles[t + 2] = i2;
@@ -255,7 +445,9 @@ impl Delaunator {
         self.link(t as i32 + 1, b);
         self.link(t as i32 + 2, c);
 
-        t + 3
+        self.triangle_len += 3;
+
+        t
     }
 
     fn link(&mut self, a: i32, b: i32) {
@@ -277,6 +469,8 @@ fn pseudo_angle(dx: f32, dy: f32) -> f32 {
 fn dist(a: &Vertex, b: &Vertex) -> f32 {
     let dx = a.x() - b.x();
     let dy = a.y() - b.y();
+
+    // println!("{a:?} {b:?} -- {dx}..{dy}, {}+{}", dx * dx, dy * dy);
 
     dx * dx + dy * dy
 }
@@ -313,12 +507,15 @@ fn circumradius(a: &Vertex, b: &Vertex, c: &Vertex) -> f32 {
 
 fn quicksort(ids: &mut Vec<usize>, dists: &mut Vec<f32>, left: usize, right: usize) {
     if right - left <= 20 {
-        for i in left + 1..right + 1 {
+        for i in (left + 1)..(right + 1) {
             let tmp = ids[i];
             let tmp_dist = dists[tmp];
             let mut j = i - 1;
             while j >= left && dists[ids[j]] > tmp_dist {
-                ids[j + 1] = ids[j - 1];
+                ids[j + 1] = ids[j];
+                if j == 0 {
+                    break;
+                }
                 j -= 1;
             }
             ids[j + 1] = tmp;
@@ -377,462 +574,34 @@ fn swap(ids: &mut Vec<usize>, i: usize, j: usize) {
     ids[j] = tmp;
 }
 
-// export default class Delaunator {
-
-// constructor(coords) {
-// this.coords = coords;
-
-// arrays that will store the triangulation graph
-// const maxTriangles = Math.max(2 * n - 5, 0);
-// this._triangles = new Uint32Array(maxTriangles * 3);
-// this._halfedges = new Int32Array(maxTriangles * 3);
-
-// temporary arrays for tracking the edges of the advancing convex hull
-// this._hashSize = Math.ceil(Math.sqrt(n));
-// this._hullPrev = new Uint32Array(n); // edge to prev edge
-// this._hullNext = new Uint32Array(n); // edge to next edge
-// this._hullTri = new Uint32Array(n); // edge to adjacent triangle
-// this._hullHash = new Int32Array(this._hashSize); // angular edge hash
-
-// temporary arrays for sorting points
-// this._ids = new Uint32Array(n);
-// this._dists = new Float64Array(n);
-
-// this.update();
-// }
-
-// update() {
-// const {coords, _hullPrev: hullPrev, _hullNext: hullNext, _hullTri: hullTri, _hullHash: hullHash} =  this;
-// const n = coords.length >> 1;
-
-// populate an array of point indices; calculate input data bbox
-//         let minX = Infinity;
-//         let minY = Infinity;
-//         let maxX = -Infinity;
-//         let maxY = -Infinity;
-
-//         for (let i = 0; i < n; i++) {
-//             const x = coords[2 * i];
-//             const y = coords[2 * i + 1];
-//             if (x < minX) minX = x;
-//             if (y < minY) minY = y;
-//             if (x > maxX) maxX = x;
-//             if (y > maxY) maxY = y;
-//             this._ids[i] = i;
-//         }
-//         const cx = (minX + maxX) / 2;
-//         const cy = (minY + maxY) / 2;
-
-//         let i0, i1, i2;
-
-//         // pick a seed point close to the centero
-//         for (let i = 0, minDist = Infinity; i < n; i++) {
-//             const d = dist(cx, cy, coords[2 * i], coords[2 * i + 1]);
-//             if (d < minDist) {
-//                 i0 = i;
-//                 minDist = d;
-//             }
-//         }
-//         const i0x = coords[2 * i0];
-//         const i0y = coords[2 * i0 + 1];
-
-//         // find the point closest to the seed
-//         for (let i = 0, minDist = Infinity; i < n; i++) {
-//             if (i === i0) continue;
-//             const d = dist(i0x, i0y, coords[2 * i], coords[2 * i + 1]);
-//             if (d < minDist && d > 0) {
-//                 i1 = i;
-//                 minDist = d;
-//             }
-//         }
-//         let i1x = coords[2 * i1];
-//         let i1y = coords[2 * i1 + 1];
-
-//         let minRadius = Infinity;
-
-//         // find the third point which forms the smallest circumcircle with the first two
-//         for (let i = 0; i < n; i++) {
-//             if (i === i0 || i === i1) continue;
-//             const r = circumradius(i0x, i0y, i1x, i1y, coords[2 * i], coords[2 * i + 1]);
-//             if (r < minRadius) {
-//                 i2 = i;
-//                 minRadius = r;
-//             }
-//         }
-//         let i2x = coords[2 * i2];
-//         let i2y = coords[2 * i2 + 1];
-
-//         if (minRadius === Infinity) {
-//             // order collinear points by dx (or dy if all x are identical)
-//             // and return the list as a hull
-//             for (let i = 0; i < n; i++) {
-//                 this._dists[i] = (coords[2 * i] - coords[0]) || (coords[2 * i + 1] - coords[1]);
-//             }
-//             quicksort(this._ids, this._dists, 0, n - 1);
-//             const hull = new Uint32Array(n);
-//             let j = 0;
-//             for (let i = 0, d0 = -Infinity; i < n; i++) {
-//                 const id = this._ids[i];
-//                 const d = this._dists[id];
-//                 if (d > d0) {
-//                     hull[j++] = id;
-//                     d0 = d;
-//                 }
-//             }
-//             this.hull = hull.subarray(0, j);
-//             this.triangles = new Uint32Array(0);
-//             this.halfedges = new Uint32Array(0);
-//             return;
-//         }
-
-//         // swap the order of the seed points for counter-clockwise orientation
-//         if (orient2d(i0x, i0y, i1x, i1y, i2x, i2y) < 0) {
-//             const i = i1;
-//             const x = i1x;
-//             const y = i1y;
-//             i1 = i2;
-//             i1x = i2x;
-//             i1y = i2y;
-//             i2 = i;
-//             i2x = x;
-//             i2y = y;
-//         }
-
-//         const center = circumcenter(i0x, i0y, i1x, i1y, i2x, i2y);
-//         this._cx = center.x;
-//         this._cy = center.y;
-
-//         for (let i = 0; i < n; i++) {
-//             this._dists[i] = dist(coords[2 * i], coords[2 * i + 1], center.x, center.y);
-//         }
-
-//         // sort the points by distance from the seed triangle circumcenter
-//         quicksort(this._ids, this._dists, 0, n - 1);
-
-//         // set up the seed triangle as the starting hull
-//         this._hullStart = i0;
-//         let hullSize = 3;
-
-//         hullNext[i0] = hullPrev[i2] = i1;
-//         hullNext[i1] = hullPrev[i0] = i2;
-//         hullNext[i2] = hullPrev[i1] = i0;
-
-//         hullTri[i0] = 0;
-//         hullTri[i1] = 1;
-//         hullTri[i2] = 2;
-
-//         hullHash.fill(-1);
-//         hullHash[this._hashKey(i0x, i0y)] = i0;
-//         hullHash[this._hashKey(i1x, i1y)] = i1;
-//         hullHash[this._hashKey(i2x, i2y)] = i2;
-
-//         this.trianglesLen = 0;
-//         this._addTriangle(i0, i1, i2, -1, -1, -1);
-
-//         for (let k = 0, xp, yp; k < this._ids.length; k++) {
-//             const i = this._ids[k];
-//             const x = coords[2 * i];
-//             const y = coords[2 * i + 1];
-
-//             // skip near-duplicate points
-// f64::EPSILON
-//             if (k > 0 && Math.abs(x - xp) <= EPSILON && Math.abs(y - yp) <= EPSILON) continue;
-//             xp = x;
-//             yp = y;
-
-//             // skip seed triangle points
-//             if (i === i0 || i === i1 || i === i2) continue;
-
-//             // find a visible edge on the convex hull using edge hash
-//             let start = 0;
-//             for (let j = 0, key = this._hashKey(x, y); j < this._hashSize; j++) {
-//                 start = hullHash[(key + j) % this._hashSize];
-//                 if (start !== -1 && start !== hullNext[start]) break;
-//             }
-
-//             start = hullPrev[start];
-//             let e = start, q;
-//             while (q = hullNext[e], orient2d(x, y, coords[2 * e], coords[2 * e + 1], coords[2 * q], coords[2 * q + 1]) >= 0) {
-//                 e = q;
-//                 if (e === start) {
-//                     e = -1;
-//                     break;
-//                 }
-//             }
-//             if (e === -1) continue; // likely a near-duplicate point; skip it
-
-//             // add the first triangle from the point
-//             let t = this._addTriangle(e, i, hullNext[e], -1, -1, hullTri[e]);
-
-//             // recursively flip triangles from the point until they satisfy the Delaunay condition
-//             hullTri[i] = this._legalize(t + 2);
-//             hullTri[e] = t; // keep track of boundary triangles on the hull
-//             hullSize++;
-
-//             // walk forward through the hull, adding more triangles and flipping recursively
-//             let n = hullNext[e];
-//             while (q = hullNext[n], orient2d(x, y, coords[2 * n], coords[2 * n + 1], coords[2 * q], coords[2 * q + 1]) < 0) {
-//                 t = this._addTriangle(n, i, q, hullTri[i], -1, hullTri[n]);
-//                 hullTri[i] = this._legalize(t + 2);
-//                 hullNext[n] = n; // mark as removed
-//                 hullSize--;
-//                 n = q;
-//             }
-
-//             // walk backward from the other side, adding more triangles and flipping
-//             if (e === start) {
-//                 while (q = hullPrev[e], orient2d(x, y, coords[2 * q], coords[2 * q + 1], coords[2 * e], coords[2 * e + 1]) < 0) {
-//                     t = this._addTriangle(q, i, e, -1, hullTri[e], hullTri[q]);
-//                     this._legalize(t + 2);
-//                     hullTri[q] = t;
-//                     hullNext[e] = e; // mark as removed
-//                     hullSize--;
-//                     e = q;
-//                 }
-//             }
-
-//             // update the hull indices
-//             this._hullStart = hullPrev[i] = e;
-//             hullNext[e] = hullPrev[n] = i;
-//             hullNext[i] = n;
-
-//             // save the two new edges in the hash table
-//             hullHash[this._hashKey(x, y)] = i;
-//             hullHash[this._hashKey(coords[2 * e], coords[2 * e + 1])] = e;
-//         }
-
-//         this.hull = new Uint32Array(hullSize);
-//         for (let i = 0, e = this._hullStart; i < hullSize; i++) {
-//             this.hull[i] = e;
-//             e = hullNext[e];
-//         }
-
-//         // trim typed triangle mesh arrays
-//         this.triangles = this._triangles.subarray(0, this.trianglesLen);
-//         this.halfedges = this._halfedges.subarray(0, this.trianglesLen);
-//     }
-
-//     _hashKey(x, y) {
-//         return Math.floor(pseudoAngle(x - this._cx, y - this._cy) * this._hashSize) % this._hashSize;
-//     }
-
-//     _legalize(a) {
-//         const {_triangles: triangles, _halfedges: halfedges, coords} = this;
-
-//         let i = 0;
-//         let ar = 0;
-
-//         // recursion eliminated with a fixed-size stack
-//         while (true) {
-//             const b = halfedges[a];
-
-//             /* if the pair of triangles doesn't satisfy the Delaunay condition
-//              * (p1 is inside the circumcircle of [p0, pl, pr]), flip them,
-//              * then do the same check/flip recursively for the new pair of triangles
-//              *
-//              *           pl                    pl
-//              *          /||\                  /  \
-//              *       al/ || \bl            al/    \a
-//              *        /  ||  \              /      \
-//              *       /  a||b  \    flip    /___ar___\
-//              *     p0\   ||   /p1   =>   p0\---bl---/p1
-//              *        \  ||  /              \      /
-//              *       ar\ || /br             b\    /br
-//              *          \||/                  \  /
-//              *           pr                    pr
-//              */
-//             const a0 = a - a % 3;
-//             ar = a0 + (a + 2) % 3;
-
-//             if (b === -1) { // convex hull edge
-//                 if (i === 0) break;
-//                 a = EDGE_STACK[--i];
-//                 continue;
-//             }
-
-//             const b0 = b - b % 3;
-//             const al = a0 + (a + 1) % 3;
-//             const bl = b0 + (b + 2) % 3;
-
-//             const p0 = triangles[ar];
-//             const pr = triangles[a];
-//             const pl = triangles[al];
-//             const p1 = triangles[bl];
-
-//             const illegal = inCircle(
-//                 coords[2 * p0], coords[2 * p0 + 1],
-//                 coords[2 * pr], coords[2 * pr + 1],
-//                 coords[2 * pl], coords[2 * pl + 1],
-//                 coords[2 * p1], coords[2 * p1 + 1]);
-
-//             if (illegal) {
-//                 triangles[a] = p1;
-//                 triangles[b] = p0;
-
-//                 const hbl = halfedges[bl];
-
-//                 // edge swapped on the other side of the hull (rare); fix the halfedge reference
-//                 if (hbl === -1) {
-//                     let e = this._hullStart;
-//                     do {
-//                         if (this._hullTri[e] === bl) {
-//                             this._hullTri[e] = a;
-//                             break;
-//                         }
-//                         e = this._hullPrev[e];
-//                     } while (e !== this._hullStart);
-//                 }
-//                 this._link(a, hbl);
-//                 this._link(b, halfedges[ar]);
-//                 this._link(ar, bl);
-
-//                 const br = b0 + (b + 1) % 3;
-
-//                 // don't worry about hitting the cap: it can only happen on extremely degenerate input
-//                 if (i < EDGE_STACK.length) {
-//                     EDGE_STACK[i++] = br;
-//                 }
-//             } else {
-//                 if (i === 0) break;
-//                 a = EDGE_STACK[--i];
-//             }
-//         }
-
-//         return ar;
-//     }
-
-//     _link(a, b) {
-//         this._halfedges[a] = b;
-//         if (b !== -1) this._halfedges[b] = a;
-//     }
-
-//     // add a new triangle given vertex indices and adjacent half-edge ids
-//     _addTriangle(i0, i1, i2, a, b, c) {
-//         const t = this.trianglesLen;
-
-//         this._triangles[t] = i0;
-//         this._triangles[t + 1] = i1;
-//         this._triangles[t + 2] = i2;
-
-//         this._link(t, a);
-//         this._link(t + 1, b);
-//         this._link(t + 2, c);
-
-//         this.trianglesLen += 3;
-
-//         return t;
-//     }
-// }
-
-// // monotonically increases with real angle, but doesn't need expensive trigonometry
-// function pseudoAngle(dx, dy) {
-//     const p = dx / (Math.abs(dx) + Math.abs(dy));
-//     return (dy > 0 ? 3 - p : 1 + p) / 4; // [0..1]
-// }
-
-// function dist(ax, ay, bx, by) {
-//     const dx = ax - bx;
-//     const dy = ay - by;
-//     return dx * dx + dy * dy;
-// }
-
-// function inCircle(ax, ay, bx, by, cx, cy, px, py) {
-//     const dx = ax - px;
-//     const dy = ay - py;
-//     const ex = bx - px;
-//     const ey = by - py;
-//     const fx = cx - px;
-//     const fy = cy - py;
-
-//     const ap = dx * dx + dy * dy;
-//     const bp = ex * ex + ey * ey;
-//     const cp = fx * fx + fy * fy;
-
-//     return dx * (ey * cp - bp * fy) -
-//            dy * (ex * cp - bp * fx) +
-//            ap * (ex * fy - ey * fx) < 0;
-// }
-
-// function circumradius(ax, ay, bx, by, cx, cy) {
-//     const dx = bx - ax;
-//     const dy = by - ay;
-//     const ex = cx - ax;
-//     const ey = cy - ay;
-
-//     const bl = dx * dx + dy * dy;
-//     const cl = ex * ex + ey * ey;
-//     const d = 0.5 / (dx * ey - dy * ex);
-
-//     const x = (ey * bl - dy * cl) * d;
-//     const y = (dx * cl - ex * bl) * d;
-
-//     return x * x + y * y;
-// }
-
-// function circumcenter(ax, ay, bx, by, cx, cy) {
-//     const dx = bx - ax;
-//     const dy = by - ay;
-//     const ex = cx - ax;
-//     const ey = cy - ay;
-
-//     const bl = dx * dx + dy * dy;
-//     const cl = ex * ex + ey * ey;
-//     const d = 0.5 / (dx * ey - dy * ex);
-
-//     const x = ax + (ey * bl - dy * cl) * d;
-//     const y = ay + (dx * cl - ex * bl) * d;
-
-//     return {x, y};
-// }
-
-// function quicksort(ids, dists, left, right) {
-//     if (right - left <= 20) {
-//         for (let i = left + 1; i <= right; i++) {
-//             const temp = ids[i];
-//             const tempDist = dists[temp];
-//             let j = i - 1;
-//             while (j >= left && dists[ids[j]] > tempDist) ids[j + 1] = ids[j--];
-//             ids[j + 1] = temp;
-//         }
-//     } else {
-//         const median = (left + right) >> 1;
-//         let i = left + 1;
-//         let j = right;
-//         swap(ids, median, i);
-//         if (dists[ids[left]] > dists[ids[right]]) swap(ids, left, right);
-//         if (dists[ids[i]] > dists[ids[right]]) swap(ids, i, right);
-//         if (dists[ids[left]] > dists[ids[i]]) swap(ids, left, i);
-
-//         const temp = ids[i];
-//         const tempDist = dists[temp];
-//         while (true) {
-//             do i++; while (dists[ids[i]] < tempDist);
-//             do j--; while (dists[ids[j]] > tempDist);
-//             if (j < i) break;
-//             swap(ids, i, j);
-//         }
-//         ids[left + 1] = ids[j];
-//         ids[j] = temp;
-
-//         if (right - i + 1 >= j - left) {
-//             quicksort(ids, dists, i, right);
-//             quicksort(ids, dists, left, j - 1);
-//         } else {
-//             quicksort(ids, dists, left, j - 1);
-//             quicksort(ids, dists, i, right);
-//         }
-//     }
-// }
-
-// function swap(arr, i, j) {
-//     const tmp = arr[i];
-//     arr[i] = arr[j];
-//     arr[j] = tmp;
-// }
-
-// function defaultGetX(p) {
-//     return p[0];
-// }
-// function defaultGetY(p) {
-//     return p[1];
-// }
+fn orient2d(a: &Vertex, b: &Vertex, c: &Vertex) -> f64 {
+    robust::orient2d(
+        robust::Coord { x: a.x(), y: a.y() },
+        robust::Coord { x: b.x(), y: b.y() },
+        robust::Coord { x: c.x(), y: c.y() },
+    )
+}
+
+fn incircle(a: &Vertex, b: &Vertex, c: &Vertex, p: &Vertex) -> bool {
+    let ax = a.x();
+    let ay = a.y();
+    let bx = b.x();
+    let by = b.y();
+    let cx = c.x();
+    let cy = c.y();
+    let px = p.x();
+    let py = p.y();
+
+    let dx = ax - px;
+    let dy = ay - py;
+    let ex = bx - px;
+    let ey = by - py;
+    let fx = cx - px;
+    let fy = cy - py;
+
+    let ap = dx * dx + dy * dy;
+    let bp = ex * ex + ey * ey;
+    let cp = fx * fx + fy * fy;
+
+    dx * (ey * cp - bp * fy) - dy * (ex * cp - bp * fx) + ap * (ex * fy - ey * fx) < 0.
+}

@@ -39,6 +39,7 @@ pub struct OutputVideoStream {
 
 impl OutputVideoStream {
     // TODO: make configurable to enable v4loopback, whatever is used on mac
+    // TODO: figure out Rgba output
     pub fn new(width: u32, height: u32) -> Result<Self> {
         let ffplay = Command::new("ffplay")
             .args(&[

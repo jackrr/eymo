@@ -119,7 +119,9 @@ fn process_frame(
     // let mut t = Transform::new(Rect::from_tl(100, 100, 400, 200));
     // t.set_scale(1.2);
     // output = t.execute(gpu, &output)?;
-    let mut tris: Vec<Vertex> = Vec::new();
+    let mut mouth_tris: Vec<Vertex> = Vec::new();
+    let mut leye_tris: Vec<Vertex> = Vec::new();
+    let mut reye_tris: Vec<Vertex> = Vec::new();
     let mut mouth_p: Vec<Point> = Vec::new();
     let mut leye_p: Vec<Point> = Vec::new();
     let mut reye_p: Vec<Point> = Vec::new();
@@ -127,10 +129,17 @@ fn process_frame(
     for face in detection.faces {
         trace!("Handling face {:?}", face);
         let mut t = Transform::new(face.mouth.clone());
-        tris = t.vertices(output.width(), output.height());
+        mouth_tris = t.vertices(output.width(), output.height());
         mouth_p = face.mouth.points.clone();
         leye_p = face.l_eye.points.clone();
         reye_p = face.r_eye.points.clone();
+
+        let mut t = Transform::new(face.l_eye.clone());
+        leye_tris = t.vertices(output.width(), output.height());
+        let mut t = Transform::new(face.r_eye.clone());
+        reye_tris = t.vertices(output.width(), output.height());
+        t.set_scale(2.);
+        output = t.execute(gpu, &output)?;
 
         // t.set_scale(2.);
         // output = t.execute(gpu, &output)?;
@@ -155,6 +164,17 @@ fn process_frame(
     //     .collect::<Vec<_>>();
     // img = imageproc::drawing::draw_polygon(&img, &pts, Rgb::from([0u8, 255u8, 0u8]));
 
+    img = draw_tris(mouth_tris, img, Rgb::from([255u8, 0u8, 0u8]));
+    img = draw_tris(leye_tris, img, Rgb::from([255u8, 255u8, 0u8]));
+    // img = draw_tris(reye_tris, img, Rgb::from([0u8, 255u8, 0u8]));
+
+    img.save("tmp/transformed.jpg")?;
+
+    Ok(img)
+}
+
+fn draw_tris(tris: Vec<Vertex>, img: RgbImage, color: Rgb<u8>) -> RgbImage {
+    let mut img = img;
     let width = img.width() as f32;
     let height = img.height() as f32;
     info!("{tris:?}");
@@ -175,12 +195,10 @@ fn process_frame(
             ),
         ];
         info!("POINTS: {points:?}");
-        img = imageproc::drawing::draw_polygon(&img, &points, Rgb::from([255u8, 255u8, 0u8]));
+        img = imageproc::drawing::draw_polygon(&img, &points, color);
     }
 
-    img.save("tmp/transformed.jpg")?;
-
-    Ok(img)
+    img
 }
 
 fn check_time(within_ms: u32, start: Instant, waypoint: &str) -> Result<()> {

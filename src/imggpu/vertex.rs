@@ -1,4 +1,4 @@
-use crate::shapes::shape::Shape;
+use crate::{shapes::shape::Shape, triangulate::Delaunator};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable, PartialEq)]
@@ -36,11 +36,11 @@ impl Vertex {
     }
 
     pub fn x(&self) -> f32 {
-        self.postion[0]
+        self.position[0]
     }
 
     pub fn y(&self) -> f32 {
-        self.postion[1]
+        self.position[1]
     }
 
     pub fn triangles_for_full_coverage() -> Vec<Self> {
@@ -101,26 +101,27 @@ impl Vertex {
     }
 
     pub fn to_triangles(list: Vec<Self>) -> Vec<Self> {
-        let mut needed = list.len() - 2;
-        let mut out_vert = Vec::new();
-        let mut cur_idx = 0;
-        while needed > 0 {
-            for i in 0..3 {
-                let idx = cur_idx + i;
-                let idx = if idx < list.len() {
-                    idx
-                } else {
-                    // use only even vertices on 2nd pass
-                    (idx * 2) % list.len()
-                };
-                out_vert.push(list[idx].clone());
-            }
-            // walking even vertices
-            cur_idx += 2;
-            needed -= 1;
-        }
+        Delaunator::new(list).triangulate()
+        // let mut needed = list.len() - 2;
+        // let mut out_vert = Vec::new();
+        // let mut cur_idx = 0;
+        // while needed > 0 {
+        //     for i in 0..3 {
+        //         let idx = cur_idx + i;
+        //         let idx = if idx < list.len() {
+        //             idx
+        //         } else {
+        //             // use only even vertices on 2nd pass
+        //             (idx * 2) % list.len()
+        //         };
+        //         out_vert.push(list[idx].clone());
+        //     }
+        //     // walking even vertices
+        //     cur_idx += 2;
+        //     needed -= 1;
+        // }
 
-        out_vert
+        // out_vert
     }
 }
 

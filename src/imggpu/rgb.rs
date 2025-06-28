@@ -1,7 +1,7 @@
 use super::gpu::GpuExecutor;
-use super::util::int_div_round_up;
+use super::util::{int_div_round_up, padded_bytes_per_row};
 use anyhow::{Error, Result};
-use image::RgbImage;
+use image::{RgbImage, RgbaImage};
 use ort::value::Tensor;
 use tracing::{debug, info, span, Level};
 
@@ -17,6 +17,66 @@ impl OutputRange {
             Self::ZeroToOne => "tex_to_rgb_buf_0_1",
         }
     }
+}
+
+pub fn texture_to_rgba(gpu: &GpuExecutor, texture: &wgpu::Texture) -> RgbaImage {
+    let width = texture.width();
+    let height = texture.height();
+
+    let padded_bytes_per_row = padded_bytes_per_row(width);
+    let unpadded_bytes_per_row = width as usize * 4;
+
+    let buffer_size =
+        padded_bytes_per_row as u64 * height as u64 * std::mem::size_of::<u8>() as u64;
+    let buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("snapshot_buffer"),
+        size: buffer_size,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    let mut encoder = gpu
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("encoder"),
+        });
+
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            aspect: wgpu::TextureAspect::All,
+            texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buffer,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: (padded_bytes_per_row as u32).into(),
+                rows_per_image: height.into(),
+            },
+        },
+        texture.size(),
+    );
+
+    gpu.queue.submit(std::iter::once(encoder.finish()));
+
+    let buffer_slice = buffer.slice(..);
+    buffer_slice.map_async(wgpu::MapMode::Read, |r| r.unwrap());
+
+    gpu.device.poll(wgpu::PollType::Wait).unwrap();
+
+    let padded_data = buffer_slice.get_mapped_range();
+    let mut pixels: Vec<u8> = vec![0; unpadded_bytes_per_row * height as usize];
+    for (padded, pixels) in padded_data
+        .chunks_exact(padded_bytes_per_row)
+        .zip(pixels.chunks_exact_mut(unpadded_bytes_per_row))
+    {
+        pixels.copy_from_slice(&padded[..unpadded_bytes_per_row]);
+    }
+    drop(padded_data);
+
+    RgbaImage::from_raw(width, height, pixels).unwrap()
 }
 
 pub fn texture_to_img(gpu: &mut GpuExecutor, texture: &wgpu::Texture) -> Result<RgbImage> {

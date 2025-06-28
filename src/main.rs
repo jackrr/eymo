@@ -90,7 +90,7 @@ fn process_frame(
     gpu: &mut GpuExecutor,
     pipeline: &mut Pipeline,
     within_ms: u32,
-) -> Result<RgbImage> {
+) -> Result<RgbaImage> {
     let span = span!(Level::INFO, "process_frame");
     let _guard = span.enter();
     let start = Instant::now();
@@ -142,7 +142,7 @@ fn process_frame(
         break;
     }
 
-    let mut img = rgb::texture_to_img(gpu, &output)?;
+    let img = rgb::texture_to_rgba(gpu, &output);
     // let pts = mouth_p
     //     .iter()
     //     .map(|p| ProcPoint::new(p.x as i32, p.y as i32))

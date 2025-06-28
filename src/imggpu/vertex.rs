@@ -103,6 +103,32 @@ impl Vertex {
     pub fn to_triangles(list: Vec<Self>) -> Vec<Self> {
         Delaunator::new(list).triangulate()
     }
+
+    pub fn sub(&mut self, o: &Self) {
+        self.position = [
+            self.position[0] - o.position[0],
+            self.position[1] - o.position[1],
+        ];
+        self.tex_coord = [
+            self.tex_coord[0] - o.tex_coord[0],
+            self.tex_coord[1] - o.tex_coord[1],
+        ];
+    }
+
+    pub fn add(&mut self, o: &Self) {
+        self.position = [
+            self.position[0] + o.position[0],
+            self.position[1] + o.position[1],
+        ];
+        self.tex_coord = [
+            self.tex_coord[0] + o.tex_coord[0],
+            self.tex_coord[1] + o.tex_coord[1],
+        ];
+    }
+
+    pub fn mult_pos(&mut self, mag: f32) {
+        self.position = [self.position[0] * mag, self.position[1] * mag];
+    }
 }
 
 #[cfg(test)]

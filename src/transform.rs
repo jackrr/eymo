@@ -222,25 +222,25 @@ impl Transform {
             });
 
         // TODO: uncomment me once working
-        // encoder.copy_texture_to_texture(
-        //     wgpu::TexelCopyTextureInfo {
-        //         texture: &tex,
-        //         mip_level: Default::default(),
-        //         origin: Default::default(),
-        //         aspect: Default::default(),
-        //     },
-        //     wgpu::TexelCopyTextureInfo {
-        //         texture: &output_tex,
-        //         mip_level: Default::default(),
-        //         origin: Default::default(),
-        //         aspect: Default::default(),
-        //     },
-        //     wgpu::Extent3d {
-        //         width: tex.width(),
-        //         height: tex.height(),
-        //         depth_or_array_layers: 1,
-        //     },
-        // );
+        encoder.copy_texture_to_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &tex,
+                mip_level: Default::default(),
+                origin: Default::default(),
+                aspect: Default::default(),
+            },
+            wgpu::TexelCopyTextureInfo {
+                texture: &output_tex,
+                mip_level: Default::default(),
+                origin: Default::default(),
+                aspect: Default::default(),
+            },
+            wgpu::Extent3d {
+                width: tex.width(),
+                height: tex.height(),
+                depth_or_array_layers: 1,
+            },
+        );
 
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("render_pass"),
@@ -265,16 +265,20 @@ impl Transform {
         Ok(output_tex)
     }
 
+    // Scale should be relative to center of polygon, "blowing out from there"
+    // idea:
+    // 1. make an origin at centerpoint of vertices
+    // 2. translate to origin
+    // 3. multiply
+    // 4. translate back
     pub fn vertices(&self, width: u32, height: u32) -> Vec<Vertex> {
         let make_vtx = |x: u32, y: u32| {
             let x = x as f32 / width as f32;
             let y = y as f32 / height as f32;
-            // FIXME: scale from center instead of TL
-            let clip_x = self.scale * x * 2. - 1.;
+            let clip_x = x * 2. - 1.;
             // cast y val to clip space, including inverting axis
-            let clip_y = 1. - y * 2. * self.scale;
+            let clip_y = 1. - y * 2.;
 
-            // FIXME: handle polygon for mouth, others
             // TODO: tile?
             // TODO: swap -- vertices clip src -> tex dest for each direction
             // TODO: copy -- vertices clip src -> tex dest
@@ -282,12 +286,11 @@ impl Transform {
             // tex coords are points we are reading _from_
             // vertex coords are clip-spaced of where we are writing _to_
             // output, input
-            // FIXME whytf is x/y always 0
             Vertex::new_with_tex(&[clip_x, clip_y], &[x, y])
         };
 
         let shape = self.shape.clone();
-        let vertices = match shape {
+        let mut vertices = match shape {
             Shape::Polygon(p) => p
                 .points
                 .iter()
@@ -306,6 +309,41 @@ impl Transform {
                 ])
             }
         };
+
+        // scale
+        let mut l = f32::MAX;
+        let mut r = f32::MIN;
+        let mut t = f32::MAX;
+        let mut b = f32::MIN;
+        for v in &vertices {
+            let x = v.x();
+            let y = v.y();
+            if x < l {
+                l = x;
+            }
+            if y < t {
+                t = y;
+            }
+            if x > r {
+                r = x;
+            }
+            if y > b {
+                b = y;
+            }
+        }
+        let center = Vertex::new(&[l + (r - l) / 2., t + (b - t) / 2.]);
+
+        if self.scale != 1. {
+            vertices = vertices
+                .iter_mut()
+                .map(|v| {
+                    v.sub(&center);
+                    v.mult_pos(self.scale);
+                    v.add(&center);
+                    *v
+                })
+                .collect::<Vec<_>>()
+        }
 
         Vertex::to_triangles(vertices)
     }

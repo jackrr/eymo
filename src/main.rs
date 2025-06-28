@@ -77,8 +77,6 @@ fn main() -> Result<()> {
             },
             Err(e) => error!("Failed to process frame: {e:?}"),
         }
-
-        break;
     }
 
     output_stream.close()?;
@@ -104,9 +102,9 @@ fn process_frame(
         frame.source_frame_format()
     );
     // TODO: can we get nokwha to give us rgba byte buffer to prevent need for decoding?
-    // let input_img: RgbaImage = frame.decode_image::<RgbAFormat>()?;
-    let input_img = image::open("./tmp/input_img.jpg")?;
-    let input_img: RgbaImage = input_img.into();
+    let input_img: RgbaImage = frame.decode_image::<RgbAFormat>()?;
+    // let input_img = image::open("./tmp/input_img.jpg")?;
+    // let input_img: RgbaImage = input_img.into();
 
     let texture =
         gpu.rgba_buffer_to_texture(input_img.as_raw(), input_img.width(), input_img.height());
@@ -138,8 +136,8 @@ fn process_frame(
         leye_tris = t.vertices(output.width(), output.height());
         let mut t = Transform::new(face.r_eye.clone());
         reye_tris = t.vertices(output.width(), output.height());
-        // t.set_scale(2.);
-        // output = t.execute(gpu, &output)?;
+        t.set_scale(2.);
+        output = t.execute(gpu, &output)?;
         check_time(within_ms, start, &format!("Image Manipulation TODO: index"))?;
         break;
     }
@@ -160,11 +158,11 @@ fn process_frame(
     //     .map(|p| ProcPoint::new(p.x as i32, p.y as i32))
     //     .collect::<Vec<_>>();
     // img = imageproc::drawing::draw_polygon(&img, &pts, Rgb::from([0u8, 255u8, 0u8]));
-    img = draw_tris(mouth_tris, img);
-    img = draw_tris(leye_tris, img);
-    img = draw_tris(reye_tris, img);
+    // img = draw_tris(mouth_tris, img);
+    // img = draw_tris(leye_tris, img);
+    // img = draw_tris(reye_tris, img);
 
-    img.save("tmp/transformed.jpg")?;
+    // img.save("tmp/transformed.jpg")?;
 
     Ok(img)
 }

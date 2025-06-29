@@ -19,20 +19,40 @@ pub struct FaceLandmarker {
 const HEIGHT: u32 = 192;
 const WIDTH: u32 = 192;
 
-// TODO: get a "canonical" detection to dial in these landmark indices
-const MOUTH_IDXS: [usize; 20] = [
-    212, 186, 92, 165, 167, 164, 393, 391, 322, 410, 287, 422, 424, 418, 421, 200, 201, 194, 204,
-    202,
+const FACE_IDXS: [usize; 37] = [
+    10, 109, 67, 103, 54, 21, 162, 127, 234, 93, 132, 58, 172, 136, 150, 149, 176, 148, 152, 377,
+    400, 378, 379, 365, 397, 288, 435, 361, 323, 454, 356, 389, 251, 284, 332, 297, 338,
 ];
-const L_EYE_IDXS: [usize; 15] = [
-    226, 247, 30, 29, 27, 28, 56, 190, 243, 233, 121, 120, 119, 118, 31,
+
+const MOUTH_IDXS: [usize; 20] = [
+    // 306 or 291
+    // TODO: is 61 right?
+    61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 409, 270, 269, 267, 0, 37, 39, 40, 185,
+];
+
+const L_EYE_IDXS: [usize; 16] = [
+    133, 173, 157, 158, 159, 160, 161, 246, 33, 7, 163, 144, 145, 153, 154, 155,
+];
+const L_EYE_REGION_IDXS: [usize; 17] = [
+    107, 66, 105, 63, 70, 156, 35, 31, 228, 229, 230, 231, 232, 233, 245, 193, 55,
 ];
 const R_EYE_IDXS: [usize; 16] = [
-    6, 417, 441, 442, 443, 444, 445, 353, 356, 261, 448, 449, 450, 451, 452, 351,
+    263, 466, 388, 387, 386, 385, 384, 398, 362, 382, 381, 380, 374, 373, 390, 249,
 ];
-const NOSE_IDXS: [usize; 18] = [
-    189, 193, 168, 6, 197, 195, 5, 275, 274, 393, 164, 167, 165, 203, 129, 126, 114, 244,
+const R_EYE_REGION_IDXS: [usize; 17] = [
+    300, 293, 334, 296, 336, 285, 417, 465, 453, 452, 451, 450, 449, 448, 261, 265, 353,
 ];
+
+const NOSE_IDXS: [usize; 23] = [
+    168, 193, 245, 188, 174, 236, 198, 209, 49, 64, 98, 97, 2, 326, 327, 294, 279, 429, 420, 456,
+    419, 351, 417,
+];
+
+#[derive(Debug, Clone)]
+pub struct Landmark {
+    pub idx: u32,
+    pub point: Point,
+}
 
 impl FaceLandmarker {
     pub fn new(threads: usize) -> Result<FaceLandmarker> {
@@ -215,10 +235,31 @@ fn extract_results(
     let y_offset = run_bounds.top() as f32;
     let origin = run_bounds.center();
 
+    let mouth = extract_feature(
+        &r,
+        &MOUTH_IDXS,
+        x_offset,
+        y_offset,
+        x_scale,
+        y_scale,
+        &origin,
+        run_rot,
+    );
+
     Ok(Face {
-        mouth: extract_feature(
+        corner_sus: get_target_landmarks(
+            &r, x_offset, y_offset, x_scale, y_scale, &origin, run_rot, &mouth,
+        ),
+        face: extract_feature(
+            &r, &FACE_IDXS, x_offset, y_offset, x_scale, y_scale, &origin, run_rot,
+        ),
+        nose: extract_feature(
+            &r, &NOSE_IDXS, x_offset, y_offset, x_scale, y_scale, &origin, run_rot,
+        ),
+        mouth,
+        l_eye: extract_feature(
             &r,
-            &MOUTH_IDXS,
+            &L_EYE_IDXS,
             x_offset,
             y_offset,
             x_scale,
@@ -226,9 +267,19 @@ fn extract_results(
             &origin,
             run_rot,
         ),
-        l_eye: extract_feature(
+        l_eye_region: extract_feature(
             &r,
-            &L_EYE_IDXS,
+            &L_EYE_REGION_IDXS,
+            x_offset,
+            y_offset,
+            x_scale,
+            y_scale,
+            &origin,
+            run_rot,
+        ),
+        r_eye_region: extract_feature(
+            &r,
+            &R_EYE_REGION_IDXS,
             x_offset,
             y_offset,
             x_scale,
@@ -246,10 +297,64 @@ fn extract_results(
             &origin,
             run_rot,
         ),
-        nose: extract_feature(
-            &r, &NOSE_IDXS, x_offset, y_offset, x_scale, y_scale, &origin, run_rot,
-        ),
     })
+}
+
+fn get_target_landmarks(
+    mesh: &[f32],
+    x_offset: f32,
+    y_offset: f32,
+    x_scale: f32,
+    y_scale: f32,
+    origin: &Point,
+    rotation: f32,
+    mouth: &Polygon,
+) -> Vec<Landmark> {
+    // 410, 287, 273, 375, 270 to find right corner of face
+    let mut landmarks = Vec::new();
+    // 1. convert mesh to series of points in output space
+
+    let mut points = Vec::new();
+    for i in 0..mesh.len() / 3 {
+        let idx = i * 3;
+        let x = x_offset + mesh[idx] * x_scale;
+        let y = y_offset + mesh[idx + 1] * y_scale;
+
+        let mut p = Point::new(x.round() as u32, y.round() as u32);
+
+        p.rotate(*origin, rotation);
+
+        points.push(p)
+    }
+
+    // 2. create polygon from vertex indices of interest
+    let roi = Polygon::new(Vec::from([
+        points[410],
+        points[287],
+        points[273],
+        points[375],
+        points[270],
+    ]));
+
+    // 3. iterate mesh, adding all points in polygon to landmarks
+    for (idx, p) in points.iter().enumerate() {
+        if roi.points.contains(p) {
+            continue;
+        }
+
+        if mouth.contains_point(*p) {
+            continue;
+        }
+
+        if roi.contains_point(*p) {
+            landmarks.push(Landmark {
+                idx: idx as u32,
+                point: p.clone(),
+            });
+        }
+    }
+
+    landmarks
 }
 
 fn extract_feature(

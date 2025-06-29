@@ -1,8 +1,11 @@
 use anyhow::Result;
 
-use crate::{imggpu::gpu::GpuExecutor, shapes::polygon::Polygon};
+use crate::{
+    imggpu::gpu::GpuExecutor,
+    shapes::{point::Point, polygon::Polygon},
+};
 use detection::FaceDetector;
-use landmarks::FaceLandmarker;
+use landmarks::{FaceLandmarker, Landmark};
 use tracing::{info, span, trace, Level};
 
 mod detection;
@@ -16,10 +19,14 @@ pub struct Pipeline {
 
 #[derive(Debug, Clone)]
 pub struct Face {
-    pub l_eye: Polygon,
-    pub r_eye: Polygon,
+    pub face: Polygon,
     pub mouth: Polygon,
     pub nose: Polygon,
+    pub l_eye: Polygon,
+    pub l_eye_region: Polygon,
+    pub r_eye: Polygon,
+    pub r_eye_region: Polygon,
+    pub corner_sus: Vec<Landmark>,
 }
 
 #[derive(Debug, Clone)]

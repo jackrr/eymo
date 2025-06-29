@@ -1,8 +1,11 @@
 #![warn(unused_extern_crates)]
 use crate::pipeline::Pipeline;
+use ab_glyph::{FontRef, PxScale};
 use anyhow::{Error, Result};
 use clap::Parser;
-use image::{imageops, DynamicImage, Pixel, Rgb, RgbImage, RgbaImage};
+use image::imageops::resize;
+use image::{imageops, DynamicImage, Pixel, Rgb, RgbImage, Rgba, RgbaImage};
+use imageproc::drawing::{draw_filled_circle, draw_text};
 use imageproc::point::Point as ProcPoint;
 use imggpu::resize::GpuExecutor;
 use imggpu::rgb;
@@ -77,6 +80,7 @@ fn main() -> Result<()> {
             },
             Err(e) => error!("Failed to process frame: {e:?}"),
         }
+        break;
     }
 
     output_stream.close()?;
@@ -94,6 +98,9 @@ fn process_frame(
     let span = span!(Level::INFO, "process_frame");
     let _guard = span.enter();
     let start = Instant::now();
+    let font = FontRef::try_from_slice(include_bytes!(
+        "/usr/share/fonts/fira-code/FiraCode-Bold.ttf"
+    ))?;
 
     trace!(
         "Byte len: {}, res: {}, format {:?}",
@@ -114,55 +121,60 @@ fn process_frame(
     check_time(within_ms, start, "Face Detection")?;
 
     let mut output = texture;
-    // let mut t = Transform::new(Rect::from_tl(100, 100, 400, 200));
-    // t.set_scale(1.2);
-    // output = t.execute(gpu, &output)?;
-    let mut mouth_tris: Vec<Vertex> = Vec::new();
-    let mut leye_tris: Vec<Vertex> = Vec::new();
-    let mut reye_tris: Vec<Vertex> = Vec::new();
-    let mut mouth_p: Vec<Point> = Vec::new();
-    let mut leye_p: Vec<Point> = Vec::new();
-    let mut reye_p: Vec<Point> = Vec::new();
+
+    let mut img = rgb::texture_to_rgba(gpu, &output);
 
     for face in detection.faces {
-        trace!("Handling face {:?}", face);
-        let mut t = Transform::new(face.mouth.clone());
-        mouth_tris = t.vertices(output.width(), output.height());
-        mouth_p = face.mouth.points.clone();
-        leye_p = face.l_eye.points.clone();
-        reye_p = face.r_eye.points.clone();
+        info!("Handling face {:?}", face);
+        // let mut t = Transform::new(face.mouth.clone());
+        // t.set_scale(3.0);
+        // // TODO: fix rotate
+        // // t.set_rot_degrees(90.);
+        // output = t.execute(gpu, &output)?;
 
-        let mut t = Transform::new(face.l_eye.clone());
-        leye_tris = t.vertices(output.width(), output.height());
-        let mut t = Transform::new(face.r_eye.clone());
-        reye_tris = t.vertices(output.width(), output.height());
-        t.set_scale(2.);
-        output = t.execute(gpu, &output)?;
-        check_time(within_ms, start, &format!("Image Manipulation TODO: index"))?;
+        // let mut t = Transform::new(face.l_eye.clone());
+        // t.set_scale(2.0);
+        // // t.set_rot_degrees(90.);
+        // output = t.execute(gpu, &output)?;
+
+        // let mut t = Transform::new(face.r_eye.clone());
+        // t.set_scale(2.);
+        // // t.set_rot_degrees(90.);
+        // output = t.execute(gpu, &output)?;
+
+        let scale = 4i32;
+
+        img = resize(
+            &img,
+            img.width() * scale as u32,
+            img.height() * scale as u32,
+            imageops::FilterType::Nearest,
+        );
+        for l in face.corner_sus {
+            img = draw_text(
+                &img,
+                Rgba([255u8, 255u8, 255u8, 255u8]),
+                scale * l.point.x as i32 + 10,
+                scale * l.point.y as i32 + 10,
+                PxScale::from(8.),
+                &font,
+                &format!("{}", l.idx),
+            );
+
+            img = draw_filled_circle(
+                &img,
+                (scale * l.point.x as i32, scale * l.point.y as i32),
+                2,
+                Rgba([255u8, 255u8, 255u8, 255u8]),
+            );
+        }
+
         break;
+
+        check_time(within_ms, start, &format!("Image Manipulation TODO: index"))?;
     }
 
-    let img = rgb::texture_to_rgba(gpu, &output);
-    // let pts = mouth_p
-    //     .iter()
-    //     .map(|p| ProcPoint::new(p.x as i32, p.y as i32))
-    //     .collect::<Vec<_>>();
-    // img = imageproc::drawing::draw_polygon(&img, &pts, Rgb::from([255u8, 255u8, 0u8]));
-    // let pts = leye_p
-    //     .iter()
-    //     .map(|p| ProcPoint::new(p.x as i32, p.y as i32))
-    //     .collect::<Vec<_>>();
-    // img = imageproc::drawing::draw_polygon(&img, &pts, Rgb::from([255u8, 0u8, 0u8]));
-    // let pts = reye_p
-    //     .iter()
-    //     .map(|p| ProcPoint::new(p.x as i32, p.y as i32))
-    //     .collect::<Vec<_>>();
-    // img = imageproc::drawing::draw_polygon(&img, &pts, Rgb::from([0u8, 255u8, 0u8]));
-    // img = draw_tris(mouth_tris, img);
-    // img = draw_tris(leye_tris, img);
-    // img = draw_tris(reye_tris, img);
-
-    // img.save("tmp/transformed.jpg")?;
+    img.save("tmp/corner_candidates.png")?;
 
     Ok(img)
 }

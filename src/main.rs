@@ -3,7 +3,6 @@ use crate::pipeline::Pipeline;
 use ab_glyph::{FontRef, PxScale};
 use anyhow::{Error, Result};
 use clap::Parser;
-use image::imageops::resize;
 use image::{imageops, DynamicImage, Pixel, Rgb, RgbImage, Rgba, RgbaImage};
 use imageproc::drawing::{draw_filled_circle, draw_text};
 use imageproc::point::Point as ProcPoint;
@@ -80,7 +79,6 @@ fn main() -> Result<()> {
             },
             Err(e) => error!("Failed to process frame: {e:?}"),
         }
-        break;
     }
 
     output_stream.close()?;
@@ -98,9 +96,6 @@ fn process_frame(
     let span = span!(Level::INFO, "process_frame");
     let _guard = span.enter();
     let start = Instant::now();
-    let font = FontRef::try_from_slice(include_bytes!(
-        "/usr/share/fonts/fira-code/FiraCode-Bold.ttf"
-    ))?;
 
     trace!(
         "Byte len: {}, res: {}, format {:?}",
@@ -122,59 +117,28 @@ fn process_frame(
 
     let mut output = texture;
 
-    let mut img = rgb::texture_to_rgba(gpu, &output);
-
     for face in detection.faces {
-        info!("Handling face {:?}", face);
-        // let mut t = Transform::new(face.mouth.clone());
-        // t.set_scale(3.0);
-        // // TODO: fix rotate
-        // // t.set_rot_degrees(90.);
-        // output = t.execute(gpu, &output)?;
+        trace!("Handling face {:?}", face);
+        let mut t = Transform::new(face.mouth.clone());
+        t.set_scale(3.0);
+        // TODO: fix rotate
+        // t.set_rot_degrees(90.);
+        output = t.execute(gpu, &output)?;
 
-        // let mut t = Transform::new(face.l_eye.clone());
-        // t.set_scale(2.0);
-        // // t.set_rot_degrees(90.);
-        // output = t.execute(gpu, &output)?;
+        let mut t = Transform::new(face.l_eye.clone());
+        t.set_scale(2.0);
+        // t.set_rot_degrees(90.);
+        output = t.execute(gpu, &output)?;
 
-        // let mut t = Transform::new(face.r_eye.clone());
-        // t.set_scale(2.);
-        // // t.set_rot_degrees(90.);
-        // output = t.execute(gpu, &output)?;
-
-        let scale = 4i32;
-
-        img = resize(
-            &img,
-            img.width() * scale as u32,
-            img.height() * scale as u32,
-            imageops::FilterType::Nearest,
-        );
-        for l in face.corner_sus {
-            img = draw_text(
-                &img,
-                Rgba([255u8, 255u8, 255u8, 255u8]),
-                scale * l.point.x as i32 + 10,
-                scale * l.point.y as i32 + 10,
-                PxScale::from(8.),
-                &font,
-                &format!("{}", l.idx),
-            );
-
-            img = draw_filled_circle(
-                &img,
-                (scale * l.point.x as i32, scale * l.point.y as i32),
-                2,
-                Rgba([255u8, 255u8, 255u8, 255u8]),
-            );
-        }
-
-        break;
+        let mut t = Transform::new(face.r_eye.clone());
+        t.set_scale(2.);
+        // t.set_rot_degrees(90.);
+        output = t.execute(gpu, &output)?;
 
         check_time(within_ms, start, &format!("Image Manipulation TODO: index"))?;
     }
 
-    img.save("tmp/corner_candidates.png")?;
+    let img = rgb::texture_to_rgba(gpu, &output);
 
     Ok(img)
 }

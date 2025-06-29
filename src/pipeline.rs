@@ -5,7 +5,7 @@ use crate::{
     shapes::{point::Point, polygon::Polygon},
 };
 use detection::FaceDetector;
-use landmarks::{FaceLandmarker, Landmark};
+use landmarks::FaceLandmarker;
 use tracing::{info, span, trace, Level};
 
 mod detection;
@@ -26,7 +26,6 @@ pub struct Face {
     pub l_eye_region: Polygon,
     pub r_eye: Polygon,
     pub r_eye_region: Polygon,
-    pub corner_sus: Vec<Landmark>,
 }
 
 #[derive(Debug, Clone)]

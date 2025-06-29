@@ -23,14 +23,5 @@ struct VertexOut {
 }
 
 @fragment fn frag_main(pos : VertexOut) -> @location(0) vec4f {
-	var coords = pos.tex_coord;
-	
-	if (rot[0] != 0.) {
-		let center = vec2f(0.5, 0.5);
-		let trans = coords - center;
-		let rot = vec2f(trans.x * rot[1] - trans.y * rot[2], trans.x * rot[2] + trans.y * rot[1]);
-		coords = rot + center;
-	}
-	
-  return textureSample(input_tex, samp, coords);
+  return textureSample(input_tex, samp, pos.tex_coord);
 }

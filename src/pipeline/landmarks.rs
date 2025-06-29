@@ -25,8 +25,6 @@ const FACE_IDXS: [usize; 37] = [
 ];
 
 const MOUTH_IDXS: [usize; 20] = [
-    // TODO: 306 or 291?
-    // TODO: is 61 right?
     61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 409, 270, 269, 267, 0, 37, 39, 40, 185,
 ];
 
@@ -55,6 +53,8 @@ impl FaceLandmarker {
         })
     }
 
+    // TODO: fixme when face is notably tilted.. something wrong with
+    // rotation in here probably
     pub fn run_gpu(
         &mut self,
         face: &detection::Face,

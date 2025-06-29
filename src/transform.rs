@@ -273,19 +273,19 @@ impl Transform {
     // 4. translate back
     pub fn vertices(&self, width: u32, height: u32) -> Vec<Vertex> {
         let make_vtx = |x: u32, y: u32| {
+            // tex coords are points we are reading _from_
+            // vertex coords are clip-spaced of where we are writing _to_
+
             let x = x as f32 / width as f32;
             let y = y as f32 / height as f32;
             let clip_x = x * 2. - 1.;
             // cast y val to clip space, including inverting axis
             let clip_y = 1. - y * 2.;
-
             // TODO: tile?
             // TODO: swap -- vertices clip src -> tex dest for each direction
             // TODO: copy -- vertices clip src -> tex dest
             // TODO: if flip -- flip x/y tex coords appropriately
-            // tex coords are points we are reading _from_
-            // vertex coords are clip-spaced of where we are writing _to_
-            // output, input
+
             Vertex::new_with_tex(&[clip_x, clip_y], &[x, y])
         };
 
@@ -310,7 +310,6 @@ impl Transform {
             }
         };
 
-        // scale
         let mut l = f32::MAX;
         let mut r = f32::MIN;
         let mut t = f32::MAX;
@@ -333,19 +332,37 @@ impl Transform {
         }
         let center = Vertex::new(&[l + (r - l) / 2., t + (b - t) / 2.]);
 
-        if self.scale != 1. {
-            vertices = vertices
-                .iter_mut()
-                .map(|v| {
-                    v.sub(&center);
-                    v.mult_pos(self.scale);
-                    v.add(&center);
-                    *v
-                })
-                .collect::<Vec<_>>()
-        }
+        vertices = vertices
+            .iter_mut()
+            .map(|v| {
+                self.transform_vertex(v, &center);
+                *v
+            })
+            .collect::<Vec<_>>();
 
         Vertex::to_triangles(vertices)
+    }
+
+    fn transform_vertex(&self, v: &mut Vertex, c: &Vertex) {
+        if self.scale != 1. {
+            v.sub(&c);
+            v.mult_pos(self.scale);
+            v.add(&c);
+        }
+
+        if self.rotate_deg.is_some() {
+            let rad = self.rotate_deg.unwrap().to_radians();
+            let cos = rad.cos();
+            let sin = rad.sin();
+
+            let old_x = v.position[0];
+            let old_y = v.position[1];
+            let trans_x = old_x - c.position[0];
+            let trans_y = old_y - c.position[1];
+            v.sub(c);
+            v.position = [trans_x * cos - trans_y * sin, trans_x * sin + trans_y * cos];
+            v.add(c);
+        }
     }
 
     fn sampler(&self, gpu: &GpuExecutor) -> wgpu::Sampler {

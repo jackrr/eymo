@@ -121,17 +121,6 @@ fn process_frame(
         trace!("Handling face {:?}", face);
         let mut t = Transform::new(face.mouth.clone());
         t.set_scale(3.0);
-        // TODO: fix rotate
-        // t.set_rot_degrees(90.);
-        output = t.execute(gpu, &output)?;
-
-        let mut t = Transform::new(face.l_eye.clone());
-        t.set_scale(2.0);
-        // t.set_rot_degrees(90.);
-        output = t.execute(gpu, &output)?;
-
-        let mut t = Transform::new(face.r_eye.clone());
-        t.set_scale(2.);
         // t.set_rot_degrees(90.);
         output = t.execute(gpu, &output)?;
 
@@ -141,36 +130,6 @@ fn process_frame(
     let img = rgb::texture_to_rgba(gpu, &output);
 
     Ok(img)
-}
-
-fn draw_tris(tris: Vec<Vertex>, img: RgbImage) -> RgbImage {
-    let mut img = img;
-    let width = img.width() as f32;
-    let height = img.height() as f32;
-    info!("{tris:?}");
-    for i in 0..tris.len() / 3 {
-        let idx = i * 3;
-        let points = [
-            ProcPoint::new(
-                (tris[idx].tex_coord[0] * width) as i32,
-                (tris[idx].tex_coord[1] * height) as i32,
-            ),
-            ProcPoint::new(
-                (tris[idx + 1].tex_coord[0] * width) as i32,
-                (tris[idx + 1].tex_coord[1] * height) as i32,
-            ),
-            ProcPoint::new(
-                (tris[idx + 2].tex_coord[0] * width) as i32,
-                (tris[idx + 2].tex_coord[1] * height) as i32,
-            ),
-        ];
-        info!("POINTS: {points:?}");
-        let r = 55 + ((i * 40) % 200);
-        let color = Rgb::from([r as u8, 0u8, 0u8]);
-        img = imageproc::drawing::draw_polygon(&img, &points, color);
-    }
-
-    img
 }
 
 fn check_time(within_ms: u32, start: Instant, waypoint: &str) -> Result<()> {

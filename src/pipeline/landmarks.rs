@@ -63,7 +63,7 @@ impl FaceLandmarker {
         tex: &wgpu::Texture,
         gpu: &mut GpuExecutor,
     ) -> Result<Face> {
-        let span = span!(Level::INFO, "face_landmarker");
+        let span = span!(Level::DEBUG, "face_landmarker");
         let _guard = span.enter();
 
         let theta = face.rot_theta();

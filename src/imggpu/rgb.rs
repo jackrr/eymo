@@ -20,7 +20,8 @@ impl OutputRange {
 }
 
 pub fn texture_to_rgba(gpu: &GpuExecutor, texture: &wgpu::Texture) -> RgbaImage {
-    let span = span!(Level::INFO, "texture_to_rgba");
+    // ~9ms
+    let span = span!(Level::DEBUG, "texture_to_rgba");
     let _guard = span.enter();
 
     let width = texture.width();

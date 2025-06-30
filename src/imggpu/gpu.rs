@@ -113,7 +113,6 @@ impl GpuExecutor {
         Ok(())
     }
 
-    // 14ms.. oof? or just first pass?
     pub fn rgba_buffer_to_texture(&self, rgba_bytes: &[u8], width: u32, height: u32) -> wgpu::Texture {
         let span = span!(Level::INFO, "rgba_buffer_to_texture");
         let _guard = span.enter();

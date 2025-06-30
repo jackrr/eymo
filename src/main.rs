@@ -57,6 +57,8 @@ fn main() -> Result<()> {
         let span = span!(Level::INFO, "frame_loop_iter");
         let _guard = span.enter();
 
+        let get_frame_span = span!(Level::INFO, "get_frame");
+        let get_frame_guard = get_frame_span.enter();
         let result = camera.frame();
         let frame = match result {
             Ok(frame) => frame,
@@ -65,12 +67,19 @@ fn main() -> Result<()> {
                 break;
             }
         };
+        drop(get_frame_guard);
 
         match process_frame(frame, &mut gpu, &mut pipeline, args.max_frame_lag_ms) {
-            Ok(img) => match output_stream.write_frame(img) {
-                Ok(_) => trace!("Rendered frame."),
-                Err(e) => error!("Failed to render frame: {e:?}"),
-            },
+            Ok(img) => {
+                // ~1-2ms
+                let write_frame_span = span!(Level::INFO, "write_frame");
+                let write_frame_guard = write_frame_span.enter();
+                match output_stream.write_frame(img) {
+                    Ok(_) => trace!("Rendered frame."),
+                    Err(e) => error!("Failed to render frame: {e:?}"),
+                }
+                drop(write_frame_guard);
+            }
             Err(e) => error!("Failed to process frame: {e:?}"),
         }
     }
@@ -91,17 +100,16 @@ fn process_frame(
     let _guard = span.enter();
     let start = Instant::now();
 
-    trace!(
-        "Byte len: {}, res: {}, format {:?}",
-        frame.buffer().len(),
-        frame.resolution(),
-        frame.source_frame_format()
-    );
-    // TODO: can we get nokwha to give us rgba byte buffer to prevent need for decoding?
+    // WOAH: 24ms
+    // TODO: Is there a faster camera format/decode solution
+    let decode_nokwha_buff_span = span!(Level::INFO, "decode_nokwha_buff");
+    let decode_nokwha_buff_guard = decode_nokwha_buff_span.enter();
     let input_img: RgbaImage = frame.decode_image::<RgbAFormat>()?;
 
     let texture =
         gpu.rgba_buffer_to_texture(input_img.as_raw(), input_img.width(), input_img.height());
+    drop(decode_nokwha_buff_guard);
+
     let detection = pipeline.run_gpu(&texture, gpu)?;
 
     // TODO: make check time return image early instead of erroring

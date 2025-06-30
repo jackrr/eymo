@@ -62,7 +62,7 @@ impl Delaunator {
     }
 
     pub fn triangulate(&mut self) -> Vec<Vertex> {
-        let span = span!(Level::INFO, "triangulate");
+        let span = span!(Level::TRACE, "triangulate");
         let _guard = span.enter();
 
         let n = (self.points.len() * 2) >> 1;

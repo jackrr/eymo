@@ -3,8 +3,8 @@ use crate::shapes::point::Point;
 use crate::shapes::shape::Shape;
 use crate::{imggpu::gpu::GpuExecutor, shapes::rect::Rect};
 use anyhow::Result;
-use tracing::{debug, info, span, warn, Level};
-use wgpu::{util::DeviceExt, ShaderStages};
+use tracing::{span, warn, Level};
+use wgpu::util::DeviceExt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlipVariant {

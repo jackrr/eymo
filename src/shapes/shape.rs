@@ -45,17 +45,6 @@ impl From<Polygon> for Shape {
 }
 
 impl Shape {
-    pub fn scale(&mut self, mag: f32, max_x: u32, max_y: u32) {
-        match self {
-            Shape::Polygon(p) => {
-                p.scale(mag, max_x, max_y);
-            }
-            Shape::Rect(r) => {
-                r.scale(mag, max_x, max_y);
-            }
-        };
-    }
-
     pub fn points(&self) -> Vec<Point> {
         match self {
             Shape::Polygon(p) => p.points.clone(),

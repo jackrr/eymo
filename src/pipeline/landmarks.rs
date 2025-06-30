@@ -2,14 +2,14 @@ use super::detection;
 use super::model::{initialize_model, Session};
 use super::Face;
 use crate::imggpu;
-use crate::imggpu::rotate::GpuExecutor;
+use crate::imggpu::gpu::GpuExecutor;
 use crate::imggpu::vertex::Vertex;
 use crate::shapes::point::Point;
 use crate::shapes::polygon::Polygon;
 use crate::shapes::rect::Rect;
 use anyhow::Result;
 use ort::session::SessionOutputs;
-use tracing::{info, span, Level};
+use tracing::{span, Level};
 use wgpu::util::DeviceExt;
 
 pub struct FaceLandmarker {

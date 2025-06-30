@@ -1,6 +1,6 @@
 use super::model::{initialize_model, Session};
 use crate::imggpu;
-use crate::imggpu::resize::GpuExecutor;
+use crate::imggpu::gpu::GpuExecutor;
 use crate::imggpu::vertex::Vertex;
 use crate::shapes::point::PointF32;
 use crate::shapes::rect::{Rect, RectF32};

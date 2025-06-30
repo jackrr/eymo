@@ -1,21 +1,15 @@
 #![warn(unused_extern_crates)]
+use crate::imggpu::gpu::GpuExecutor;
 use crate::pipeline::Pipeline;
-use ab_glyph::{FontRef, PxScale};
 use anyhow::{Error, Result};
 use clap::Parser;
-use image::{imageops, DynamicImage, Pixel, Rgb, RgbImage, Rgba, RgbaImage};
-use imageproc::drawing::{draw_filled_circle, draw_text};
-use imageproc::point::Point as ProcPoint;
-use imggpu::resize::GpuExecutor;
+use image::RgbaImage;
 use imggpu::rgb;
-use imggpu::vertex::Vertex;
 use nokhwa::pixel_format::RgbAFormat;
-use nokhwa::{Buffer, FormatDecoder};
+use nokhwa::Buffer;
 use num_cpus::get as get_cpu_count;
-use shapes::point::Point;
-use shapes::rect::Rect;
 use std::time::Instant;
-use tracing::{debug, error, info, span, trace, warn, Level};
+use tracing::{debug, error, span, trace, warn, Level};
 use tracing_subscriber::fmt;
 use tracing_subscriber::fmt::format::FmtSpan;
 use transform::Transform;
@@ -122,6 +116,7 @@ fn process_frame(
         t.copy_to([face.r_eye.into()], false);
         t.swap_with(face.l_eye_region.into());
         t.set_flip(transform::FlipVariant::Both);
+        t.set_rot_degrees(45.);
         output = t.execute(gpu, &output)?;
 
         check_time(within_ms, start, &format!("Image Manipulation TODO: index"))?;

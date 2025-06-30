@@ -62,7 +62,6 @@ impl Delaunator {
     }
 
     pub fn triangulate(&mut self) -> Vec<Vertex> {
-        // FIXME why is right half of mouth missing?
         let span = span!(Level::INFO, "triangulate");
         let _guard = span.enter();
 
@@ -123,7 +122,7 @@ impl Delaunator {
                 v0_idx = i;
             }
         }
-        let mut v0 = v0.unwrap();
+        let v0 = v0.unwrap();
 
         // find the point closest to the seed
         let mut v1: Option<Vertex> = None;
@@ -350,7 +349,7 @@ impl Delaunator {
     ) -> usize {
         let mut a = a;
         let mut i = 0;
-        // #[ignore(unused_assignments)]
+        #[allow(unused_assignments)]
         let mut ar = 0;
 
         loop {

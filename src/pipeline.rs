@@ -1,12 +1,9 @@
 use anyhow::Result;
 
-use crate::{
-    imggpu::gpu::GpuExecutor,
-    shapes::{point::Point, polygon::Polygon},
-};
+use crate::{imggpu::gpu::GpuExecutor, shapes::polygon::Polygon};
 use detection::FaceDetector;
 use landmarks::FaceLandmarker;
-use tracing::{info, span, trace, Level};
+use tracing::{span, trace, Level};
 
 mod detection;
 mod landmarks;

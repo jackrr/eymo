@@ -105,8 +105,6 @@ fn process_frame(
     );
     // TODO: can we get nokwha to give us rgba byte buffer to prevent need for decoding?
     let input_img: RgbaImage = frame.decode_image::<RgbAFormat>()?;
-    // let input_img = image::open("./tmp/input_img.jpg")?;
-    // let input_img: RgbaImage = input_img.into();
 
     let texture =
         gpu.rgba_buffer_to_texture(input_img.as_raw(), input_img.width(), input_img.height());
@@ -120,8 +118,10 @@ fn process_frame(
     for face in detection.faces {
         trace!("Handling face {:?}", face);
         let mut t = Transform::new(face.mouth.clone());
-        t.set_scale(3.0);
-        // t.set_rot_degrees(90.);
+        t.set_scale(2.);
+        t.copy_to([face.r_eye.into()], false);
+        t.swap_with(face.l_eye_region.into());
+        t.set_flip(transform::FlipVariant::Both);
         output = t.execute(gpu, &output)?;
 
         check_time(within_ms, start, &format!("Image Manipulation TODO: index"))?;

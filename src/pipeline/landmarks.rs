@@ -24,6 +24,7 @@ const FACE_IDXS: [usize; 37] = [
     400, 378, 379, 365, 397, 288, 435, 361, 323, 454, 356, 389, 251, 284, 332, 297, 338,
 ];
 
+// FIXME: mouth crops too tight
 const MOUTH_IDXS: [usize; 20] = [
     61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 409, 270, 269, 267, 0, 37, 39, 40, 185,
 ];
@@ -53,8 +54,9 @@ impl FaceLandmarker {
         })
     }
 
-    // TODO: fixme when face is notably tilted.. something wrong with
-    // rotation in here probably
+    // FIXME: when face is notably tilted detections get
+    // wonky.. something wrong with rotation in here probably
+    // FIXME: eye + eye region output triangulation is sometimes chopping off
     pub fn run_gpu(
         &mut self,
         face: &detection::Face,
@@ -166,7 +168,6 @@ impl FaceLandmarker {
         let left = bounds.left() as f32 / tex.width() as f32;
         let top = bounds.top() as f32 / tex.height() as f32;
         let bottom = bounds.bottom() as f32 / tex.height() as f32;
-        info!("{left},{top}->{right},{bottom}");
         let vertices = Vec::from([
             Vertex::new_with_tex(&[1., 1.], &[right, top]),
             Vertex::new_with_tex(&[-1., 1.], &[left, top]),

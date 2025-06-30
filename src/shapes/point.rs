@@ -47,6 +47,10 @@ impl Point {
     }
 
     pub fn project(self, src: &Rect, target: &Rect) -> Self {
+        if src == target {
+            return self;
+        }
+
         let x_offset_pct = (self.x - src.left()) as f32 / src.w as f32;
         let y_offset_pct = (self.y - src.top()) as f32 / src.h as f32;
 

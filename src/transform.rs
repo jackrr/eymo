@@ -1,11 +1,12 @@
-use crate::imggpu::gpu::GpuExecutor;
 use crate::imggpu::vertex::Vertex;
+use crate::shapes::point::Point;
 use crate::shapes::shape::Shape;
+use crate::{imggpu::gpu::GpuExecutor, shapes::rect::Rect};
 use anyhow::Result;
-use tracing::{debug, info, span, Level};
+use tracing::{debug, info, span, warn, Level};
 use wgpu::{util::DeviceExt, ShaderStages};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlipVariant {
     Vertical,
     Horizontal,
@@ -15,7 +16,7 @@ pub enum FlipVariant {
 #[derive(Debug, Clone)]
 pub struct Transform {
     shape: Shape,
-    copy_dest: Option<Shape>,
+    copy_dests: Vec<Shape>,
     swap: Option<Shape>,
     rotate_deg: Option<f32>,
     flip: Option<FlipVariant>,
@@ -27,7 +28,7 @@ impl Default for Transform {
     fn default() -> Self {
         Self {
             shape: Default::default(),
-            copy_dest: None,
+            copy_dests: Vec::new(),
             swap: None,
             rotate_deg: None,
             flip: None,
@@ -36,6 +37,9 @@ impl Default for Transform {
         }
     }
 }
+
+const TILE_HEIGHT: u32 = 100;
+const TILE_WIDTH: u32 = 160;
 
 impl Transform {
     pub fn new(shape: impl Into<Shape>) -> Self {
@@ -49,8 +53,11 @@ impl Transform {
         self.flip = Some(f);
     }
 
-    pub fn copy_to(&mut self, s: Shape) {
-        self.copy_dest = Some(s);
+    pub fn copy_to(&mut self, dests: impl Into<Vec<Shape>>, keep: bool) {
+        self.copy_dests = dests.into();
+        if keep {
+            self.copy_dests.push(self.shape.clone());
+        }
     }
 
     pub fn swap_with(&mut self, s: Shape) {
@@ -59,14 +66,30 @@ impl Transform {
 
     pub fn set_scale(&mut self, s: f32) {
         self.scale = s;
+
+        if self.tile {
+            warn!("Scale with tile not currently supported. Skipping scale operation.");
+        }
     }
 
     pub fn set_tiling(&mut self, t: bool) {
         self.tile = t;
+
+        if self.scale != 1. {
+            warn!("Scale with tile not currently supported. Skipping scale operation.");
+        }
+
+        if self.rotate_deg.is_some() {
+            warn!("Rotate with tile not currently supported. Skipping rotate operation.");
+        }
     }
 
     pub fn set_rot_degrees(&mut self, deg: f32) {
         self.rotate_deg = Some(deg);
+
+        if self.tile {
+            warn!("Rotate with tile not currently supported. Skipping rotate operation.");
+        }
     }
 
     pub fn execute(&self, gpu: &mut GpuExecutor, tex: &wgpu::Texture) -> Result<wgpu::Texture> {
@@ -97,16 +120,6 @@ impl Transform {
                             binding: 1,
                             visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                             ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 2,
-                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
                             count: None,
                         },
                     ],
@@ -150,21 +163,6 @@ impl Transform {
                 cache: None,
             });
 
-        let rot = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("rot"),
-            size: 12,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        gpu.queue.write_buffer(
-            &rot,
-            0,
-            &bytemuck::cast_slice(&match self.rotate_deg {
-                Some(d) => [1., d.to_radians().cos(), d.to_radians().sin()],
-                None => [0., 0., 0.],
-            }),
-        );
-
         let render_bg = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("render_bind_group2"),
             layout: &bind_group_layout,
@@ -179,14 +177,9 @@ impl Transform {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&sampler),
                 },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: rot.as_entire_binding(),
-                },
             ],
         });
 
-        // TODO: can we just overwrite input tex for perf?
         let output_tex = gpu.device.create_texture(&wgpu::TextureDescriptor {
             label: None,
             size: wgpu::Extent3d {
@@ -211,7 +204,7 @@ impl Transform {
                 label: Some("encoder"),
             });
 
-        let vertices = self.vertices(tex.width(), tex.height());
+        let vertices = self.vertices(tex);
 
         let vertex_buffer = gpu
             .device
@@ -221,7 +214,6 @@ impl Transform {
                 usage: wgpu::BufferUsages::VERTEX,
             });
 
-        // TODO: uncomment me once working
         encoder.copy_texture_to_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &tex,
@@ -265,56 +257,98 @@ impl Transform {
         Ok(output_tex)
     }
 
-    // Scale should be relative to center of polygon, "blowing out from there"
-    // idea:
-    // 1. make an origin at centerpoint of vertices
-    // 2. translate to origin
-    // 3. multiply
-    // 4. translate back
-    pub fn vertices(&self, width: u32, height: u32) -> Vec<Vertex> {
-        let make_vtx = |x: u32, y: u32| {
+    pub fn vertices(&self, tex: &wgpu::Texture) -> Vec<Vertex> {
+        if self.tile {
+            return self.tiled_vertices(tex);
+        }
+
+        let mut vertex_groups = Vec::new();
+
+        for ds in &self.copy_dests {
+            vertex_groups.push(self.vertices_for_shapes(tex, &self.shape, ds));
+        }
+
+        if self.swap.is_some() {
+            let swap = self.swap.as_ref().unwrap().clone();
+            vertex_groups.push(self.vertices_for_shapes(tex, &self.shape, &swap));
+            vertex_groups.push(self.vertices_for_shapes(tex, &swap, &self.shape));
+        }
+
+        if vertex_groups.len() == 0 {
+            vertex_groups.push(self.vertices_for_shapes(tex, &self.shape, &self.shape));
+        }
+
+        vertex_groups.concat()
+    }
+
+    fn vertices_for_shapes(&self, tex: &wgpu::Texture, src: &Shape, dest: &Shape) -> Vec<Vertex> {
+        let width = tex.width() as f32;
+        let height = tex.height() as f32;
+        let make_vtx = |(src, dest): (Point, Point)| -> Vertex {
             // tex coords are points we are reading _from_
             // vertex coords are clip-spaced of where we are writing _to_
-
-            let x = x as f32 / width as f32;
-            let y = y as f32 / height as f32;
+            let x = dest.x as f32 / width;
+            let y = dest.y as f32 / height;
             let clip_x = x * 2. - 1.;
             // cast y val to clip space, including inverting axis
             let clip_y = 1. - y * 2.;
-            // TODO: tile?
-            // TODO: swap -- vertices clip src -> tex dest for each direction
-            // TODO: copy -- vertices clip src -> tex dest
-            // TODO: if flip -- flip x/y tex coords appropriately
 
-            Vertex::new_with_tex(&[clip_x, clip_y], &[x, y])
+            Vertex::new_with_tex(
+                &[clip_x, clip_y],
+                &[src.x as f32 / width, src.y as f32 / height],
+            )
         };
+        let mut vertices = src
+            .iter_projection_onto(dest.clone())
+            .map(make_vtx)
+            .collect::<Vec<_>>();
+        vertices = self.scale_rotate_flip(&mut vertices);
 
-        let shape = self.shape.clone();
-        let mut vertices = match shape {
-            Shape::Polygon(p) => p
-                .points
-                .iter()
-                .map(|p| make_vtx(p.x, p.y))
-                .collect::<Vec<_>>(),
-            Shape::Rect(sr) => {
-                let r = sr.right();
-                let l = sr.left();
-                let t = sr.top();
-                let b = sr.bottom();
-                Vec::from([
-                    make_vtx(r, t),
-                    make_vtx(l, t),
-                    make_vtx(l, b),
-                    make_vtx(r, b),
-                ])
+        Vertex::to_triangles(vertices)
+    }
+
+    fn tiled_vertices(&self, tex: &wgpu::Texture) -> Vec<Vertex> {
+        let width = tex.width();
+        let height = tex.height();
+        let tex_rect = Rect::from(self.shape.clone());
+        let tr = tex_rect.right() as f32 / width as f32;
+        let tl = tex_rect.left() as f32 / width as f32;
+        let tt = tex_rect.top() as f32 / height as f32;
+        let tb = tex_rect.bottom() as f32 / height as f32;
+        let tex_tr = [tr, tt];
+        let tex_tl = [tl, tt];
+        let tex_bl = [tl, tb];
+        let tex_br = [tr, tb];
+
+        let mut rects = Vec::new();
+        for ry in 0..height.div_ceil(TILE_HEIGHT) {
+            for rx in 0..width.div_ceil(TILE_WIDTH) {
+                let l = ((rx * TILE_WIDTH) as f32 / width as f32) * 2. - 1.;
+                let r = ((rx + 1) * TILE_WIDTH).min(width) as f32 / width as f32 * 2. - 1.;
+                let t = 1. - (ry * TILE_HEIGHT) as f32 / height as f32 * 2.;
+                let b = 1. - ((ry + 1) * TILE_HEIGHT).min(height) as f32 / height as f32 * 2.;
+
+                let mut vertices = Vec::from([
+                    Vertex::new_with_tex(&[r, t], &tex_tr),
+                    Vertex::new_with_tex(&[l, t], &tex_tl),
+                    Vertex::new_with_tex(&[l, b], &tex_bl),
+                    Vertex::new_with_tex(&[r, b], &tex_br),
+                ]);
+
+                vertices = self.scale_rotate_flip(&mut vertices);
+                rects.push(Vertex::to_triangles(vertices));
             }
-        };
+        }
 
+        rects.concat()
+    }
+
+    fn scale_rotate_flip(&self, vertices: &mut Vec<Vertex>) -> Vec<Vertex> {
         let mut l = f32::MAX;
         let mut r = f32::MIN;
         let mut t = f32::MAX;
         let mut b = f32::MIN;
-        for v in &vertices {
+        for v in &*vertices {
             let x = v.x();
             let y = v.y();
             if x < l {
@@ -330,27 +364,60 @@ impl Transform {
                 b = y;
             }
         }
-        let center = Vertex::new(&[l + (r - l) / 2., t + (b - t) / 2.]);
+        let clip_center = Vertex::new(&[l + (r - l) / 2., t + (b - t) / 2.]);
 
-        vertices = vertices
+        // Texture bounds (for flip)
+        let mut l = f32::MAX;
+        let mut r = f32::MIN;
+        let mut t = f32::MAX;
+        let mut b = f32::MIN;
+        for v in &*vertices {
+            let x = v.tex_coord[0];
+            let y = v.tex_coord[1];
+            if x < l {
+                l = x;
+            }
+            if y < t {
+                t = y;
+            }
+            if x > r {
+                r = x;
+            }
+            if y > b {
+                b = y;
+            }
+        }
+
+        vertices
             .iter_mut()
             .map(|v| {
-                self.transform_vertex(v, &center);
+                self.transform_vertex(v, &clip_center, l, r, t, b);
                 *v
             })
-            .collect::<Vec<_>>();
-
-        Vertex::to_triangles(vertices)
+            .collect::<Vec<_>>()
     }
 
-    fn transform_vertex(&self, v: &mut Vertex, c: &Vertex) {
-        if self.scale != 1. {
+    fn transform_vertex(&self, v: &mut Vertex, c: &Vertex, l: f32, r: f32, t: f32, b: f32) {
+        if self.flip.is_some() {
+            let flip_variant = self.flip.unwrap();
+
+            if flip_variant == FlipVariant::Both || flip_variant == FlipVariant::Horizontal {
+                v.tex_coord[0] = flip(v.tex_coord[0], l, r);
+            }
+
+            if flip_variant == FlipVariant::Both || flip_variant == FlipVariant::Vertical {
+                v.tex_coord[1] = flip(v.tex_coord[1], t, b);
+            }
+        }
+
+        // TODO: scale and rotate support for tiling
+        if self.scale != 1. && !self.tile {
             v.sub(&c);
             v.mult_pos(self.scale);
             v.add(&c);
         }
 
-        if self.rotate_deg.is_some() {
+        if self.rotate_deg.is_some() && !self.tile {
             let rad = self.rotate_deg.unwrap().to_radians();
             let cos = rad.cos();
             let sin = rad.sin();
@@ -381,4 +448,10 @@ impl Transform {
             ..Default::default()
         })
     }
+}
+
+fn flip(val: f32, min: f32, max: f32) -> f32 {
+    // Invert val within range
+    let res = min + max - val;
+    res.min(max).max(min)
 }

@@ -119,12 +119,17 @@ fn process_frame(
 
     for face in detection.faces {
         trace!("Handling face {:?}", face);
+
+        let mut t = Transform::new(face.l_eye.clone());
+        t.set_translation(100, -80);
+        t.set_scale(2.);
+
+        output = t.execute(gpu, &output)?;
+
         let mut t = Transform::new(face.mouth.clone());
-        t.set_scale(1.8);
+        t.set_scale(1.3);
         t.copy_to([face.r_eye_region.into()], false);
         t.swap_with(face.l_eye_region.into());
-        // t.set_flip(transform::FlipVariant::Both);
-        // t.set_rot_degrees(45.);
         output = t.execute(gpu, &output)?;
 
         check_time(within_ms, start, &format!("Image Manipulation TODO: index"))?;

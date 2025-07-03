@@ -20,6 +20,7 @@ pub struct Transform {
     swap: Option<Shape>,
     rotate_deg: Option<f32>,
     flip: Option<FlipVariant>,
+    translate: Option<(i32, i32)>,
     scale: f32,
     tile: bool,
 }
@@ -32,6 +33,7 @@ impl Default for Transform {
             swap: None,
             rotate_deg: None,
             flip: None,
+            translate: None,
             scale: 1.,
             tile: false,
         }
@@ -75,12 +77,20 @@ impl Transform {
     pub fn set_tiling(&mut self, t: bool) {
         self.tile = t;
 
-        if self.scale != 1. {
-            warn!("Scale with tile not currently supported. Skipping scale operation.");
-        }
+        if self.tile {
+            if self.scale != 1. {
+                warn!("Scale with tile not currently supported. Skipping scale operation.");
+            }
 
-        if self.rotate_deg.is_some() {
-            warn!("Rotate with tile not currently supported. Skipping rotate operation.");
+            if self.rotate_deg.is_some() {
+                warn!("Rotate with tile not currently supported. Skipping rotate operation.");
+            }
+
+            if self.translate.is_some() {
+                warn!(
+                    "Translation with tile not currently supported. Skipping translate operation."
+                );
+            }
         }
     }
 
@@ -89,6 +99,14 @@ impl Transform {
 
         if self.tile {
             warn!("Rotate with tile not currently supported. Skipping rotate operation.");
+        }
+    }
+
+    pub fn set_translation(&mut self, x: i32, y: i32) {
+        self.translate = Some((x, y));
+
+        if self.tile {
+            warn!("Translation with tile not currently supported. Skipping translate operation.");
         }
     }
 
@@ -302,7 +320,7 @@ impl Transform {
             .iter_projection_onto(dest.clone())
             .map(make_vtx)
             .collect::<Vec<_>>();
-        vertices = self.scale_rotate_flip(&mut vertices);
+        vertices = self.scale_rotate_flip(&mut vertices, tex.width(), tex.height());
 
         Vertex::to_triangles(vertices)
     }
@@ -335,7 +353,7 @@ impl Transform {
                     Vertex::new_with_tex(&[r, b], &tex_br),
                 ]);
 
-                vertices = self.scale_rotate_flip(&mut vertices);
+                vertices = self.scale_rotate_flip(&mut vertices, width, height);
                 rects.push(Vertex::to_triangles(vertices));
             }
         }
@@ -343,7 +361,12 @@ impl Transform {
         rects.concat()
     }
 
-    fn scale_rotate_flip(&self, vertices: &mut Vec<Vertex>) -> Vec<Vertex> {
+    fn scale_rotate_flip(
+        &self,
+        vertices: &mut Vec<Vertex>,
+        width: u32,
+        height: u32,
+    ) -> Vec<Vertex> {
         let mut l = f32::MAX;
         let mut r = f32::MIN;
         let mut t = f32::MAX;
@@ -388,16 +411,30 @@ impl Transform {
             }
         }
 
+        let trans = Vertex::new(&match self.translate {
+            None => [0., 0.],
+            Some(t) => [t.0 as f32 / width as f32, -1. * t.1 as f32 / height as f32],
+        });
+
         vertices
             .iter_mut()
             .map(|v| {
-                self.transform_vertex(v, &clip_center, l, r, t, b);
+                self.transform_vertex(v, &clip_center, l, r, t, b, &trans);
                 *v
             })
             .collect::<Vec<_>>()
     }
 
-    fn transform_vertex(&self, v: &mut Vertex, c: &Vertex, l: f32, r: f32, t: f32, b: f32) {
+    fn transform_vertex(
+        &self,
+        v: &mut Vertex,
+        c: &Vertex,
+        l: f32,
+        r: f32,
+        t: f32,
+        b: f32,
+        trans: &Vertex,
+    ) {
         if self.flip.is_some() {
             let flip_variant = self.flip.unwrap();
 
@@ -410,25 +447,31 @@ impl Transform {
             }
         }
 
-        // TODO: scale and rotate support for tiling
-        if self.scale != 1. && !self.tile {
-            v.sub(&c);
-            v.mult_pos(self.scale);
-            v.add(&c);
-        }
+        // TODO: scale, rotate, translate support for tiling
+        if !self.tile {
+            if self.translate.is_some() {
+                v.add(&trans);
+            }
 
-        if self.rotate_deg.is_some() && !self.tile {
-            let rad = self.rotate_deg.unwrap().to_radians();
-            let cos = rad.cos();
-            let sin = rad.sin();
+            if self.scale != 1. {
+                v.sub(&c);
+                v.mult_pos(self.scale);
+                v.add(&c);
+            }
 
-            let old_x = v.position[0];
-            let old_y = v.position[1];
-            let trans_x = old_x - c.position[0];
-            let trans_y = old_y - c.position[1];
-            v.sub(c);
-            v.position = [trans_x * cos - trans_y * sin, trans_x * sin + trans_y * cos];
-            v.add(c);
+            if self.rotate_deg.is_some() {
+                let rad = self.rotate_deg.unwrap().to_radians();
+                let cos = rad.cos();
+                let sin = rad.sin();
+
+                let old_x = v.position[0];
+                let old_y = v.position[1];
+                let trans_x = old_x - c.position[0];
+                let trans_y = old_y - c.position[1];
+                v.sub(c);
+                v.position = [trans_x * cos - trans_y * sin, trans_x * sin + trans_y * cos];
+                v.add(c);
+            }
         }
     }
 

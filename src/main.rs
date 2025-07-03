@@ -1,13 +1,13 @@
 #![warn(unused_extern_crates)]
-use crate::imggpu::gpu::GpuExecutor;
-use crate::pipeline::Pipeline;
 use anyhow::{Error, Result};
 use clap::Parser;
 use image::RgbaImage;
+use imggpu::gpu::GpuExecutor;
 use imggpu::rgb;
 use nokhwa::pixel_format::RgbAFormat;
 use nokhwa::Buffer;
 use num_cpus::get as get_cpu_count;
+use pipeline::Pipeline;
 use std::time::Instant;
 use tracing::{debug, error, span, trace, warn, Level};
 use tracing_subscriber::fmt;
@@ -15,6 +15,7 @@ use tracing_subscriber::fmt::format::FmtSpan;
 use transform::Transform;
 use video::{create_input_stream, OutputVideoStream};
 mod imggpu;
+mod lang;
 mod pipeline;
 mod shapes;
 mod transform;
@@ -53,6 +54,8 @@ fn main() -> Result<()> {
     let mut output_stream = OutputVideoStream::new(resolution.width(), resolution.height())?;
     let mut gpu = GpuExecutor::new()?;
 
+    let transforms = lang::parse(std::fs::read_to_string("config.txt")?)?;
+
     loop {
         let span = span!(Level::INFO, "frame_loop_iter");
         let _guard = span.enter();
@@ -69,7 +72,13 @@ fn main() -> Result<()> {
         };
         drop(get_frame_guard);
 
-        match process_frame(frame, &mut gpu, &mut pipeline, args.max_frame_lag_ms) {
+        match process_frame(
+            frame,
+            &mut gpu,
+            &mut pipeline,
+            args.max_frame_lag_ms,
+            &transforms,
+        ) {
             Ok(img) => {
                 // ~1-2ms
                 let write_frame_span = span!(Level::INFO, "write_frame");
@@ -95,6 +104,7 @@ fn process_frame(
     gpu: &mut GpuExecutor,
     pipeline: &mut Pipeline,
     within_ms: u32,
+    transforms: &Vec<Transform>,
 ) -> Result<RgbaImage> {
     let span = span!(Level::INFO, "process_frame");
     let _guard = span.enter();
@@ -119,16 +129,18 @@ fn process_frame(
 
     for face in detection.faces {
         trace!("Handling face {:?}", face);
+        // TODO: set shape on transforms accordingly then execute
+        // refactor transform to take shape as runtime arg?
 
         let mut t = Transform::new(face.l_eye.clone());
-        t.set_translation(100, -80);
+        t.translate_by(100, -80);
         t.set_scale(2.);
 
         output = t.execute(gpu, &output)?;
 
         let mut t = Transform::new(face.mouth.clone());
         t.set_scale(1.3);
-        t.copy_to([face.r_eye_region.into()], false);
+        t.write_to([face.r_eye_region.into()]);
         t.swap_with(face.l_eye_region.into());
         output = t.execute(gpu, &output)?;
 

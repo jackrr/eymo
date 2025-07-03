@@ -44,22 +44,23 @@ const TILE_HEIGHT: u32 = 100;
 const TILE_WIDTH: u32 = 160;
 
 impl Transform {
-    pub fn new(shape: impl Into<Shape>) -> Self {
-        Self {
-            shape: shape.into(),
-            ..Default::default()
-        }
+    pub fn set_shape(&mut self, s: impl Into<Shape>) {
+        self.shape = s.into();
     }
 
     pub fn set_flip(&mut self, f: FlipVariant) {
         self.flip = Some(f);
     }
 
-    pub fn copy_to(&mut self, dests: impl Into<Vec<Shape>>, keep: bool) {
+    pub fn copy_to(&mut self, dests: impl Into<Vec<Shape>>) {
+        // Apply transforms to self shape and dests
         self.copy_dests = dests.into();
-        if keep {
-            self.copy_dests.push(self.shape.clone());
-        }
+        self.copy_dests.push(self.shape.clone());
+    }
+
+    pub fn write_to(&mut self, dests: impl Into<Vec<Shape>>) {
+        // Apply transforms ONLY to dests
+        self.copy_dests = dests.into();
     }
 
     pub fn swap_with(&mut self, s: Shape) {
@@ -102,7 +103,7 @@ impl Transform {
         }
     }
 
-    pub fn set_translation(&mut self, x: i32, y: i32) {
+    pub fn translate_by(&mut self, x: i32, y: i32) {
         self.translate = Some((x, y));
 
         if self.tile {

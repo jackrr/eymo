@@ -1,5 +1,6 @@
 use anyhow::Result;
 
+use crate::shapes::rect::Rect;
 use crate::{imggpu::gpu::GpuExecutor, shapes::polygon::Polygon};
 use detection::FaceDetector;
 use landmarks::FaceLandmarker;
@@ -23,6 +24,7 @@ pub struct Face {
     pub l_eye_region: Polygon,
     pub r_eye: Polygon,
     pub r_eye_region: Polygon,
+    pub bound: Rect,
 }
 
 #[derive(Debug, Clone)]

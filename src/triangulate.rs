@@ -1,7 +1,9 @@
 use core::f32;
 
 use crate::imggpu::vertex::Vertex;
-use tracing::{span, Level};
+use image::{Rgb, RgbImage};
+use imageproc::drawing::draw_filled_circle;
+use tracing::{info, span, Level};
 
 /*
 ISC License
@@ -57,7 +59,7 @@ impl Delaunator {
             triangle_len: 0,
             hull_start: 0,
             edge_stack: [0; 512],
-            hull: Vec::new(),
+            hull: Vec::with_capacity(n),
         }
     }
 
@@ -72,14 +74,12 @@ impl Delaunator {
         let mut max_x = f32::MIN;
         let mut max_y = f32::MIN;
 
-        let mut hull = Vec::with_capacity(n);
         let mut ids = Vec::with_capacity(n);
         let mut dists = Vec::with_capacity(n);
         let mut hull_prev = Vec::with_capacity(n);
         let mut hull_next = Vec::with_capacity(n);
         let mut hull_hash = Vec::with_capacity(n);
         let mut hull_tri: Vec<usize> = Vec::with_capacity(n);
-        // let mut hull = Vec::new();
 
         for i in 0..n {
             let x = self.points[i].x();
@@ -99,7 +99,6 @@ impl Delaunator {
             }
             ids.push(i);
             dists.push(0.);
-            hull.push(0);
             hull_prev.push(0);
             hull_next.push(0);
             hull_hash.push(0);
@@ -177,7 +176,6 @@ impl Delaunator {
                 let id = ids[i];
                 let d = dists[id];
                 if d > d0 {
-                    hull.push(id);
                     d0 = d;
                 }
             }
@@ -273,7 +271,7 @@ impl Delaunator {
                 e = q;
                 if e == start as usize {
                     // likely a near-duplicate point; skip it
-                    break 'id_iter;
+                    continue 'id_iter;
                 }
             }
 

@@ -9,7 +9,7 @@ use crate::shapes::polygon::Polygon;
 use crate::shapes::rect::Rect;
 use anyhow::Result;
 use ort::session::SessionOutputs;
-use tracing::{span, Level};
+use tracing::{info, span, Level};
 use wgpu::util::DeviceExt;
 
 pub struct FaceLandmarker {
@@ -24,9 +24,8 @@ const FACE_IDXS: [usize; 37] = [
     400, 378, 379, 365, 397, 288, 435, 361, 323, 454, 356, 389, 251, 284, 332, 297, 338,
 ];
 
-// FIXME: mouth crops too tight
-const MOUTH_IDXS: [usize; 20] = [
-    61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 409, 270, 269, 267, 0, 37, 39, 40, 185,
+const MOUTH_IDXS: [usize; 19] = [
+    164, 167, 165, 216, 212, 202, 204, 194, 201, 200, 421, 418, 424, 422, 432, 436, 322, 391, 393,
 ];
 
 const L_EYE_IDXS: [usize; 16] = [
@@ -56,7 +55,6 @@ impl FaceLandmarker {
 
     // FIXME: when face is notably tilted detections get
     // wonky.. something wrong with rotation in here probably
-    // FIXME: eye + eye region output triangulation is sometimes chopping off
     pub fn run_gpu(
         &mut self,
         face: &detection::Face,
@@ -67,9 +65,10 @@ impl FaceLandmarker {
         let _guard = span.enter();
 
         let theta = face.rot_theta();
+        info!("Tilt: {}", theta.to_degrees());
         let mut bounds = face.bounds.clone();
-        // pad 25% on each side
-        bounds.scale(1.5, tex.width(), tex.height());
+        // pad 30% vertically
+        bounds = bounds.scale_y(1.6, tex.height());
 
         let sampler = gpu.device.create_sampler(&wgpu::SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -231,6 +230,7 @@ fn extract_results(
     let origin = run_bounds.center();
 
     Ok(Face {
+        bound: run_bounds,
         face: extract_feature(
             &r, &FACE_IDXS, x_offset, y_offset, x_scale, y_scale, &origin, run_rot,
         ),

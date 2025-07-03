@@ -1,13 +1,14 @@
 use super::model::{initialize_model, Session};
-use crate::imggpu::resize::{CachedResizer, GpuExecutor, ResizeAlgo, Resizer};
+use crate::imggpu;
+use crate::imggpu::gpu::GpuExecutor;
+use crate::imggpu::vertex::Vertex;
 use crate::shapes::point::PointF32;
 use crate::shapes::rect::{Rect, RectF32};
 use anchors::gen_anchors;
 use anyhow::Result;
-use image::RgbImage;
-use ndarray::Array;
-use ort::value::Tensor;
-use tracing::{debug, span, Level};
+use ort::session::SessionOutputs;
+use tracing::{span, trace, Level};
+use wgpu::util::DeviceExt;
 
 mod anchors;
 
@@ -17,7 +18,6 @@ const HEIGHT: u32 = 128;
 pub struct FaceDetector {
     model: Session,
     anchors: [RectF32; 896],
-    resizer: CachedResizer,
 }
 
 #[derive(Debug, Clone)]
@@ -41,7 +41,7 @@ impl Face {
     pub fn rot_theta(&self) -> f32 {
         let dx = self.r_eye.x - self.l_eye.x;
         let dy = self.r_eye.y - self.l_eye.y;
-        -dy.atan2(dx)
+        dy.atan2(dx)
     }
 }
 
@@ -54,7 +54,7 @@ impl FaceDetector {
     Model Input: 128x128 f32 image
     Model Output:
     - 896 length array of confidence scores (classificators)
-    - 896 length 2D array of detection coords (regressors)
+      - 896 length 2D array of detection coords (regressors)
 
     The first 4 values in the detection coords are centroid, width,
     height offsets applied to a particular cell among 2 predetermined
@@ -64,57 +64,169 @@ impl FaceDetector {
 
     // scale gets interpolated
 
-    */
+     */
     pub fn new(threads: usize) -> Result<FaceDetector> {
         Ok(FaceDetector {
             model: initialize_model("mediapipe_face_detection_short_range.onnx", threads)?,
             anchors: gen_anchors(),
-            resizer: CachedResizer::new()?,
         })
     }
 
-    pub fn run(&mut self, img: &RgbImage) -> Result<Vec<Face>> {
+    pub fn run_gpu(&mut self, tex: &wgpu::Texture, gpu: &mut GpuExecutor) -> Result<Vec<Face>> {
+        // TODO: CLEAN ME UP
         let span = span!(Level::INFO, "face_detector");
         let _guard = span.enter();
 
-        let span_res = span!(Level::INFO, "face_detector_resize");
-        let res_span_guard = span_res.enter();
-        let resized = self.resizer.run(img, WIDTH, HEIGHT, ResizeAlgo::Nearest);
+        let sampler = gpu.device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        let shader_code = wgpu::include_wgsl!("detection.wgsl");
+        let shader = gpu.load_shader("detection", shader_code);
 
-        drop(res_span_guard);
-
-        let span_tensor = span!(Level::INFO, "face_detector_tensor");
-        let tensor_span_guard = span_tensor.enter();
-        let resized_width = resized.width();
-        let resized_height = resized.height();
-
-        let input_arr =
-            Array::from_shape_fn((1, HEIGHT as usize, WIDTH as usize, 3), |(_, y, x, c)| {
-                let x: u32 = x as u32;
-                let y: u32 = y as u32;
-
-                if y >= resized_height {
-                    0.
-                } else if x >= resized_width {
-                    0.
-                } else {
-                    (resized.get_pixel(x, y)[c] as f32 / 127.5) - 1. // -1.0 - 1.0 range
-                }
+        let render_pipeline = gpu
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("render_pipeline"),
+                layout: None,
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vert_main"),
+                    compilation_options: Default::default(),
+                    buffers: &[Vertex::desc()],
+                },
+                primitive: wgpu::PrimitiveState {
+                    ..Default::default()
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("frag_main"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                depth_stencil: None,
+                multisample: Default::default(),
+                multiview: None,
+                cache: None,
             });
 
-        let input = Tensor::from_array(input_arr)?;
-        drop(tensor_span_guard);
+        let out_dims = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("out_dims"),
+            size: 8,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        gpu.queue.write_buffer(
+            &out_dims,
+            0,
+            &bytemuck::cast_slice(&[(WIDTH as f32), (HEIGHT as f32)]),
+        );
 
-        // model -- 2-20ms (either 2ms or like 18-20ms... why?)
-        let span_model = span!(Level::INFO, "face_detector_model");
-        let model_span_guard = span_model.enter();
-        let outputs = self.model.run(ort::inputs!["input" => input]?)?;
+        let render_bg = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("render_bind_group"),
+            layout: &render_pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(
+                        &tex.create_view(&Default::default()),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: out_dims.as_entire_binding(),
+                },
+            ],
+        });
+
+        let resize_output_tex = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: WIDTH,
+                height: HEIGHT,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            view_formats: &[wgpu::TextureFormat::Rgba8Unorm],
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::TEXTURE_BINDING,
+        });
+
+        let mut encoder = gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("encoder"),
+            });
+
+        let vertices = Vertex::triangles_for_full_coverage();
+        let vertex_buffer = gpu
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("vertex_buffer"),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+
+        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("render_pass"),
+            color_attachments: &[
+                // This is what @location(0) in the fragment shader targets
+                Some(wgpu::RenderPassColorAttachment {
+                    view: &resize_output_tex.create_view(&Default::default()),
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(Default::default()),
+                        // load: wgpu::LoadOp::Load,    // read previous layer
+                        store: wgpu::StoreOp::Store, // overwrite with fragment output
+                    },
+                }),
+            ],
+            ..Default::default()
+        });
+
+        render_pass.set_pipeline(&render_pipeline);
+        render_pass.set_bind_group(0, &render_bg, &[]);
+        render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        render_pass.draw(0..vertices.len() as u32, 0..1);
+        drop(render_pass);
+
+        gpu.queue.submit(std::iter::once(encoder.finish()));
+
+        let tensor = imggpu::rgb::texture_to_tensor(
+            gpu,
+            &resize_output_tex,
+            imggpu::rgb::OutputRange::NegOneToOne,
+        )?;
+        let outputs = self.model.run(ort::inputs!["input" => tensor]?)?;
+        self.extract_results(outputs, tex.width(), tex.height(), WIDTH, HEIGHT)
+    }
+
+    fn extract_results(
+        &self,
+        outputs: SessionOutputs,
+        input_width: u32,
+        input_height: u32,
+        resized_width: u32,
+        resized_height: u32,
+    ) -> Result<Vec<Face>> {
         let regressors = outputs["regressors"].try_extract_tensor::<f32>()?;
         let classificators = outputs["classificators"].try_extract_tensor::<f32>()?;
-        drop(model_span_guard);
 
-        let span_result = span!(Level::INFO, "face_detector_results");
-        let result_span_guard = span_result.enter();
         let scores = classificators.as_slice().unwrap();
 
         let detections = regressors.squeeze();
@@ -124,8 +236,8 @@ impl FaceDetector {
         for res in detections.rows() {
             let score = sigmoid_stable(scores[row_idx]);
             if score > 0.5 {
-                let x_scale = img.width() as f32 / resized_width as f32;
-                let y_scale = img.height() as f32 / resized_height as f32;
+                let x_scale = input_width as f32 / resized_width as f32;
+                let y_scale = input_height as f32 / resized_height as f32;
 
                 // TODO: gen_anchor needs work...
                 // let mut anchor = gen_anchor(row_idx.try_into().unwrap())?;
@@ -164,9 +276,7 @@ impl FaceDetector {
             row_idx += 1;
         }
 
-        drop(result_span_guard);
-
-        debug!("Detected {} faces", results.len());
+        trace!("Detected {} faces", results.len());
 
         Ok(results)
     }

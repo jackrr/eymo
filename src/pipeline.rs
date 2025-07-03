@@ -1,11 +1,10 @@
 use anyhow::Result;
-use image::{Rgb, RgbImage};
 
-use crate::shapes::polygon::Polygon;
+use crate::shapes::rect::Rect;
+use crate::{imggpu::gpu::GpuExecutor, shapes::polygon::Polygon};
 use detection::FaceDetector;
-use imageproc::drawing;
 use landmarks::FaceLandmarker;
-use tracing::{debug, info, span, trace, Level};
+use tracing::{span, trace, Level};
 
 mod detection;
 mod landmarks;
@@ -18,10 +17,14 @@ pub struct Pipeline {
 
 #[derive(Debug, Clone)]
 pub struct Face {
-    pub l_eye: Polygon,
-    pub r_eye: Polygon,
+    pub face: Polygon,
     pub mouth: Polygon,
     pub nose: Polygon,
+    pub l_eye: Polygon,
+    pub l_eye_region: Polygon,
+    pub r_eye: Polygon,
+    pub r_eye_region: Polygon,
+    pub bound: Rect,
 }
 
 #[derive(Debug, Clone)]
@@ -37,48 +40,19 @@ impl Pipeline {
         })
     }
 
-    pub fn run(&mut self, img: &RgbImage) -> Result<Detection> {
+    pub fn run_gpu(&mut self, tex: &wgpu::Texture, gpu: &mut GpuExecutor) -> Result<Detection> {
         let span = span!(Level::INFO, "pipeline");
         let _guard = span.enter();
 
-        let face_bounds = self.face_detector.run(img)?;
-
+        let face_bounds = self.face_detector.run_gpu(tex, gpu)?;
         let mut faces = Vec::new();
         for face_bound in face_bounds {
             trace!("Face bound: {face_bound:?}");
 
-            let face = self.face_landmarker.run(img, &face_bound)?;
-            info!("Landmarker done");
+            let face = self.face_landmarker.run_gpu(&face_bound, tex, gpu)?;
             trace!("Face features: {face:?}");
 
             faces.push(face);
-        }
-
-        Ok(Detection { faces })
-    }
-
-    pub fn run_trace(&mut self, img: &mut RgbImage) -> Result<Detection> {
-        let face_bounds = self.face_detector.run(img)?;
-        let mut faces = Vec::new();
-
-        for face_bound in face_bounds {
-            trace!("Face bound: {face_bound:?}");
-            let face = self.face_landmarker.run(img, &face_bound)?;
-            trace!("Face features: {face:?}");
-            faces.push(face);
-            drawing::draw_hollow_rect_mut(img, face_bound.bounds.into(), Rgb([255u8, 0u8, 0u8]));
-            drawing::draw_filled_circle_mut(
-                img,
-                (face_bound.l_eye.x as i32, face_bound.l_eye.y as i32),
-                3,
-                Rgb([0u8, 255u8, 0u8]),
-            );
-            drawing::draw_filled_circle_mut(
-                img,
-                (face_bound.r_eye.x as i32, face_bound.r_eye.y as i32),
-                3,
-                Rgb([255u8, 0u8, 0u8]),
-            );
         }
 
         Ok(Detection { faces })

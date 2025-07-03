@@ -22,12 +22,21 @@ pub struct RectF32 {
 
 impl Into<Rect> for RectF32 {
     fn into(self) -> Rect {
-        Rect {
+        let mut r = Rect {
             x: self.x.round() as u32,
             y: self.y.round() as u32,
             w: self.w.round() as u32,
             h: self.h.round() as u32,
-        }
+        };
+
+        r.scale(1., r.right(), r.bottom());
+        r
+    }
+}
+
+impl PartialEq for Rect {
+    fn eq(&self, o: &Rect) -> bool {
+        self.x == o.x && self.y == o.y && self.w == o.w && self.h == o.h
     }
 }
 
@@ -123,6 +132,20 @@ impl Rect {
             x: self.x,
             y: self.y,
         }
+    }
+
+    pub fn points(&self) -> Vec<Point> {
+        let l = self.left();
+        let r = self.right();
+        let b = self.bottom();
+        let t = self.top();
+
+        Vec::from([
+            Point::new(r, t),
+            Point::new(l, t),
+            Point::new(l, b),
+            Point::new(r, b),
+        ])
     }
 
     pub fn resize(&mut self, width: u32, height: u32) -> Self {

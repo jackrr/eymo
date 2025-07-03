@@ -1,3 +1,4 @@
 pub mod gpu;
-pub mod resize;
-pub mod rotate;
+pub mod rgb;
+pub mod util;
+pub mod vertex;

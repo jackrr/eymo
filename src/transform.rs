@@ -44,6 +44,12 @@ const TILE_HEIGHT: u32 = 100;
 const TILE_WIDTH: u32 = 160;
 
 impl Transform {
+    pub fn new(s: impl Into<Shape>) -> Self {
+        Self {
+            shape: s.into(),
+            ..Default::default()
+        }
+    }
     pub fn set_shape(&mut self, s: impl Into<Shape>) {
         self.shape = s.into();
     }

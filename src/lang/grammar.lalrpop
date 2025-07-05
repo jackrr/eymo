@@ -1,0 +1,92 @@
+use crate::lang::ast::{Statement, Shape, FaceRef, FacePart, Operation, FlipVariant};
+use crate::shapes::rect::Rect;
+use std::str::FromStr;
+
+grammar;
+
+match {
+    r"//[^\n\r]*[\n\r]*" => { }, // Skip `// comments`
+    r"/\*[^*]*\*+(?:[^/*][^*]*\*+)*/" => { },  // Skip `/* comments */`
+		r"[0-9]+" => UINT,
+} else {
+    r"-?[0-9]+" => SINT
+} else {
+    r"-?[0-9]+\.[0-9]*" => F32,
+		_
+}
+
+pub Statements = WhitespaceDelim<Statement>;
+
+pub Statement: Statement = {
+    <shape:Shape> r": *" <operations:Operations> => Statement {<>}
+};
+
+Shape: Shape = {
+		"rect(" <x:Num> <y:Num> <w:Num> <h:Num> ")" => Shape::Rect(Rect::from_tl(x, y, w, h)),
+		<part:FacePart> "#" <face_idx:Num> => Shape::FaceRef(FaceRef {part, face_idx: Some(face_idx)}),
+    <part:FacePart> => Shape::FaceRef(FaceRef { part, face_idx: None }),
+};
+
+FacePart: FacePart = {
+		"leye" => FacePart::LEye,
+		"reye" => FacePart::REye,
+		"leye_region" => FacePart::LEyeRegion,
+		"reye_region" => FacePart::REyeRegion,
+		"face" => FacePart::Face,
+		"nose" => FacePart::Nose,
+		"mouth" => FacePart::Mouth,
+};
+
+Operations = CommaDelim<Operation>;
+
+Operation: Operation = {
+    "tile" => Operation::Tile,
+		"scale(" <f:Float> ")" => Operation::Scale(f),
+		"rotate(" <f:Float> ")" => Operation::Rotate(f),
+		"write_to(" <s:Shape> ")" => Operation::WriteTo(s),
+		"swap_with(" <s:Shape> ")" => Operation::SwapWith(s),
+		"copy_to(" <s:Shape> ")" => Operation::CopyTo(s),
+		"translate(" <x:Int> r" *, *" <y:Int> ")" => Operation::Translate(<>),
+		"flip(" <fv:FlipVariant> ")" => Operation::Flip(fv)
+};
+
+FlipVariant: FlipVariant = {
+    "both" => FlipVariant::Both,
+		"vertical" => FlipVariant::Vertical,
+		"horizontal" => FlipVariant::Horizontal,
+};
+
+Num: u32 = {
+		UINT => u32::from_str(<>).unwrap(),
+};
+
+Int: i32 = {
+		SINT => i32::from_str(<>).unwrap(),
+		UINT => i32::from_str(<>).unwrap(),
+};
+
+Float: f32 = {
+    F32 => f32::from_str(<>).unwrap(),
+		SINT => f32::from_str(<>).unwrap(),
+		UINT => f32::from_str(<>).unwrap(),
+};
+
+CommaDelim<T>: Vec<T> = {
+    <mut v:(<T> r" *, *")*> <e:T?> => match e {
+        None => v,
+        Some(e) => {
+            v.push(e);
+            v
+        }
+    }
+};
+
+WhitespaceDelim<T>: Vec<T> = {
+    r"\s*" <mut v:(<T> r"\s*")*> <e:T?> r"\s*" => match e {
+        None => v,
+        Some(e) => {
+            v.push(e);
+            v
+        }
+    }
+}

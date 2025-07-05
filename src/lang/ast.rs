@@ -1,6 +1,8 @@
 use crate::shapes::rect::Rect;
 pub use crate::transform::FlipVariant;
 
+// TODO: Add clear statement
+// TODO: Add ability to invert shape (on transform and lang)
 #[derive(Debug)]
 pub struct Statement {
     pub shape: Shape,
@@ -30,6 +32,7 @@ pub enum FacePart {
     Nose,
 }
 
+// TODO: Add fill operation + transform
 #[derive(Debug)]
 pub enum Operation {
     Tile,

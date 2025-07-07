@@ -4,6 +4,7 @@ use clap::Parser;
 use image::RgbaImage;
 use imggpu::gpu::GpuExecutor;
 use imggpu::rgb;
+use lang::ast::Statement;
 use nokhwa::pixel_format::RgbAFormat;
 use nokhwa::Buffer;
 use num_cpus::get as get_cpu_count;
@@ -54,7 +55,7 @@ fn main() -> Result<()> {
     let mut output_stream = OutputVideoStream::new(resolution.width(), resolution.height())?;
     let mut gpu = GpuExecutor::new()?;
 
-    let transforms = lang::parse(std::fs::read_to_string("config.txt")?)?;
+    let interpreter = lang::parse(&std::fs::read_to_string("config.txt")?)?;
 
     loop {
         let span = span!(Level::INFO, "frame_loop_iter");
@@ -77,7 +78,7 @@ fn main() -> Result<()> {
             &mut gpu,
             &mut pipeline,
             args.max_frame_lag_ms,
-            &transforms,
+            &interpreter,
         ) {
             Ok(img) => {
                 // ~1-2ms
@@ -104,7 +105,7 @@ fn process_frame(
     gpu: &mut GpuExecutor,
     pipeline: &mut Pipeline,
     within_ms: u32,
-    transforms: &Vec<Transform>,
+    interpreter: &lang::Interpreter,
 ) -> Result<RgbaImage> {
     let span = span!(Level::INFO, "process_frame");
     let _guard = span.enter();
@@ -121,30 +122,15 @@ fn process_frame(
     drop(decode_nokwha_buff_guard);
 
     let detection = pipeline.run_gpu(&texture, gpu)?;
-
     // TODO: make check time return image early instead of erroring
     check_time(within_ms, start, "Face Detection")?;
 
+    let transforms = interpreter.transforms(&detection);
+
     let mut output = texture;
-
-    for face in detection.faces {
-        trace!("Handling face {:?}", face);
-        // TODO: set shape on transforms accordingly then execute
-        // refactor transform to take shape as runtime arg?
-
-        let mut t = Transform::new(face.l_eye.clone());
-        t.translate_by(100, -80);
-        t.set_scale(2.);
-
-        output = t.execute(gpu, &output)?;
-
-        let mut t = Transform::new(face.mouth.clone());
-        t.set_scale(1.3);
-        t.write_to([face.r_eye_region.into()]);
-        t.swap_with(face.l_eye_region.into());
-        output = t.execute(gpu, &output)?;
-
-        check_time(within_ms, start, &format!("Image Manipulation TODO: index"))?;
+    for (idx, transform) in transforms.iter().enumerate() {
+        output = transform.execute(gpu, &output)?;
+        check_time(within_ms, start, &format!("Image Manipulation {idx}"))?;
     }
 
     let img = rgb::texture_to_rgba(gpu, &output);

@@ -43,9 +43,9 @@ Operation: Operation = {
     "tile" => Operation::Tile,
 		"scale(" <f:Float> ")" => Operation::Scale(f),
 		"rotate(" <f:Float> ")" => Operation::Rotate(f),
-		"write_to(" <s:Shape> ")" => Operation::WriteTo(s),
+		"copy_to(" <s:CommaDelim<Shape>> ")" => Operation::CopyTo(s),
+		"write_to(" <s:CommaDelim<Shape>> ")" => Operation::WriteTo(s),
 		"swap_with(" <s:Shape> ")" => Operation::SwapWith(s),
-		"copy_to(" <s:Shape> ")" => Operation::CopyTo(s),
 		"translate(" <x:Int> r" *, *" <y:Int> ")" => Operation::Translate(<>),
 		"flip(" <fv:FlipVariant> ")" => Operation::Flip(fv)
 };
@@ -82,7 +82,7 @@ CommaDelim<T>: Vec<T> = {
 };
 
 WhitespaceDelim<T>: Vec<T> = {
-    r"\s*" <mut v:(<T> r"\s*")*> <e:T?> r"\s*" => match e {
+    r"\s*"? <mut v:(<T> r"\s*")*> <e:T?> r"\s*" => match e {
         None => v,
         Some(e) => {
             v.push(e);

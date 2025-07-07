@@ -27,10 +27,7 @@ pub struct Face {
     pub bound: Rect,
 }
 
-#[derive(Debug, Clone)]
-pub struct Detection {
-    pub faces: Vec<Face>,
-}
+pub type Detection = Vec<Face>;
 
 impl Pipeline {
     pub fn new(max_threads: usize) -> Result<Pipeline> {
@@ -55,6 +52,6 @@ impl Pipeline {
             faces.push(face);
         }
 
-        Ok(Detection { faces })
+        Ok(faces)
     }
 }

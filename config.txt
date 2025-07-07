@@ -1,5 +1,5 @@
-leye: translate_by(100, -80)
+leye: translate(100, -80)
 mouth#1: swap_with(mouth#0)
-mouth#0: scale(2.5), write_to(l_eye_region), swap_with(r_eye)
+mouth#0: scale(2.5), write_to(leye_region), swap_with(reye)
 
 

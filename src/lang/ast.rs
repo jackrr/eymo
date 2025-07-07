@@ -38,9 +38,9 @@ pub enum Operation {
     Tile,
     Scale(f32),
     Rotate(f32),
-    WriteTo(Shape),
+    WriteTo(Vec<Shape>),
+    CopyTo(Vec<Shape>),
     SwapWith(Shape),
-    CopyTo(Shape),
     Translate(i32, i32),
     Flip(FlipVariant),
 }

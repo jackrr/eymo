@@ -1,9 +1,11 @@
+use crate::imggpu::gpu::GpuExecutor;
 use crate::pipeline::{Detection, Face};
 use crate::shapes::shape::Shape;
-use crate::Transform;
+use crate::transform::Transform;
 use anyhow::{Error, Result};
 use ast::{Operation, Statement};
 use lalrpop_util::lalrpop_mod;
+use std::collections::HashMap;
 use std::ptr;
 use tracing::{trace, warn};
 
@@ -18,36 +20,44 @@ pub fn parse(input: &str) -> Result<Interpreter> {
     }
 }
 
-// TODO: maintain mapping of statements and current state,
-// allowing transforms to "save" state into mapping,
-// and forwarding that state into the transform for next iteration
-// (for spin + drift)
+type TransformCache = HashMap<String, Transform>;
+
 #[derive(Debug)]
 pub struct Interpreter {
     statements: Vec<Statement>,
+    transforms: TransformCache,
 }
 
 impl Interpreter {
     pub fn new(statements: Vec<Statement>) -> Self {
-        Self { statements }
+        Self {
+            statements,
+            transforms: HashMap::new(),
+        }
     }
 
-    // pub fn load(&mut self, input: &'prog str) -> Result<()> {
-    //     let statements = parser::StatementsParser::new().parse(input)?;
-    //     Ok(Self {
-    //         statements: &statements,
-    //     })
-    // }
+    pub fn execute(
+        &mut self,
+        detection: &Detection,
+        tex: wgpu::Texture,
+        gpu: &mut GpuExecutor,
+    ) -> Result<wgpu::Texture> {
+        let mut output = tex;
+        // TODO: expose pattern for checking time / halting exec
+        let mut prev_transforms = std::mem::replace(&mut self.transforms, HashMap::new());
 
-    pub fn transforms(&self, detection: &Detection) -> Vec<Transform> {
-        let mut transforms = Vec::new();
-
-        for statement in &self.statements {
+        for (idx, statement) in self.statements.iter().enumerate() {
             trace!("Handling statement {statement:?}");
             match statement {
-                Statement::Transform(t) => {
-                    match build_transforms(t, detection) {
-                        Ok(mut ts) => transforms.append(&mut ts),
+                Statement::Transform(s) => {
+                    match build_transforms(&s, detection, idx, &mut prev_transforms) {
+                        Ok(mut ts) => {
+                            while ts.len() > 0 {
+                                let mut t = ts.swap_remove(0);
+                                output = t.execute(gpu, &output)?;
+                                self.transforms.insert(t.id.clone(), t);
+                            }
+                        }
                         Err(e) => warn!("{e:?}"),
                     };
                 }
@@ -57,21 +67,49 @@ impl Interpreter {
             }
         }
 
-        transforms
+        Ok(output)
     }
 }
 
-fn build_transforms(statement: &ast::Transform, detection: &Detection) -> Result<Vec<Transform>> {
+fn get_or_create_transform(
+    transform_cache: &mut TransformCache,
+    id: String,
+    s: impl Into<Shape>,
+) -> Transform {
+    let transform = transform_cache.remove(&id);
+    match transform {
+        Some(mut transform) => {
+            transform.set_shape(s);
+            transform
+        }
+        None => Transform::new(s, id),
+    }
+}
+
+fn build_transforms(
+    statement: &ast::Transform,
+    detection: &Detection,
+    statement_idx: usize,
+    transform_cache: &mut TransformCache,
+) -> Result<Vec<Transform>> {
     match &statement.shape {
         ast::Shape::Rect(r) => {
-            let mut t = Transform::new(r.clone());
+            let mut t = get_or_create_transform(
+                transform_cache,
+                format!("rect-{statement_idx}"),
+                r.clone(),
+            );
             apply_operations(&mut t, statement, detection, None);
             Ok(Vec::from([t]))
         }
         ast::Shape::FaceRef(fr) => match fr.face_idx {
             Some(idx) => match detection.get(idx as usize) {
                 Some(face) => {
-                    let mut t = Transform::new(face_shape(&fr.part, face));
+                    let mut t = get_or_create_transform(
+                        transform_cache,
+                        format!("face-{idx}-{statement_idx}"),
+                        face_shape(&fr.part, face),
+                    );
                     apply_operations(&mut t, statement, detection, Some(face));
                     Ok(Vec::from([t]))
                 }
@@ -79,8 +117,12 @@ fn build_transforms(statement: &ast::Transform, detection: &Detection) -> Result
             },
             None => {
                 let mut transforms = Vec::new();
-                for face in detection {
-                    let mut t = Transform::new(face_shape(&fr.part, face));
+                for (idx, face) in detection.iter().enumerate() {
+                    let mut t = get_or_create_transform(
+                        transform_cache,
+                        format!("face-{idx}-{statement_idx}"),
+                        face_shape(&fr.part, face),
+                    );
                     apply_operations(&mut t, statement, detection, Some(face));
                     transforms.push(t);
                 }
@@ -140,9 +182,8 @@ fn apply_operations(
             },
             Operation::Translate(x, y) => t.translate_by(*x, *y),
             Operation::Flip(v) => t.set_flip(*v),
-            // TODO: state for drift and spin
-            Operation::Drift(velocity, angle) => t.set_drift(velocity, angle),
-            Operation::Spin(velocity, counter_clockwise) => t.set_spin(velocity, counter_clockwise),
+            Operation::Drift(velocity, angle) => t.set_drift(*velocity, *angle),
+            Operation::Spin(velocity) => t.set_spin(*velocity),
         }
     }
 }

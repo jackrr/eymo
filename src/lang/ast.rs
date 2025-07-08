@@ -50,5 +50,5 @@ pub enum Operation {
     Translate(i32, i32),
     Flip(FlipVariant),
     Drift(f32, f32),
-    Spin(f32, bool),
+    Spin(f32),
 }

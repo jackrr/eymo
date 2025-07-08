@@ -52,6 +52,13 @@ impl Shape {
         }
     }
 
+    pub fn center(&self) -> Point {
+        match self {
+            Shape::Polygon(p) => p.center(),
+            Shape::Rect(r) => r.center(),
+        }
+    }
+
     pub fn iter_projection_onto(&self, o: impl Into<Shape>) -> ShapeProjectionIter {
         ShapeProjectionIter::new(self.clone(), o)
     }

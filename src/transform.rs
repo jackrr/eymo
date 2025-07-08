@@ -1,9 +1,11 @@
+use std::time::Instant;
+
 use crate::imggpu::vertex::Vertex;
 use crate::shapes::point::Point;
 use crate::shapes::shape::Shape;
 use crate::{imggpu::gpu::GpuExecutor, shapes::rect::Rect};
 use anyhow::Result;
-use tracing::{span, warn, Level};
+use tracing::{span, trace, warn, Level};
 use wgpu::util::DeviceExt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,27 +17,41 @@ pub enum FlipVariant {
 
 #[derive(Debug, Clone)]
 pub struct Transform {
+    pub id: String,
     shape: Shape,
     copy_dests: Vec<Shape>,
     swap: Option<Shape>,
+    initial_rotate_deg: Option<f32>,
     rotate_deg: Option<f32>,
     flip: Option<FlipVariant>,
-    translate: Option<(i32, i32)>,
+    initial_translation: Option<(i32, i32)>,
+    translation: Option<(i32, i32)>,
     scale: f32,
     tile: bool,
+    rps: Option<f32>,
+    last_tick: Option<Instant>,
+    drift_vec: Option<(f32, f32)>,
+    initial_drift_vec: Option<(f32, f32)>,
 }
 
 impl Default for Transform {
     fn default() -> Self {
         Self {
+            id: "".to_string(),
             shape: Default::default(),
             copy_dests: Vec::new(),
             swap: None,
+            initial_rotate_deg: None,
             rotate_deg: None,
             flip: None,
-            translate: None,
+            initial_translation: None,
+            translation: None,
             scale: 1.,
             tile: false,
+            rps: None,
+            last_tick: None,
+            drift_vec: None,
+            initial_drift_vec: None,
         }
     }
 }
@@ -44,12 +60,14 @@ const TILE_HEIGHT: u32 = 100;
 const TILE_WIDTH: u32 = 160;
 
 impl Transform {
-    pub fn new(s: impl Into<Shape>) -> Self {
+    pub fn new(s: impl Into<Shape>, id: String) -> Self {
         Self {
+            id,
             shape: s.into(),
             ..Default::default()
         }
     }
+
     pub fn set_shape(&mut self, s: impl Into<Shape>) {
         self.shape = s.into();
     }
@@ -93,7 +111,13 @@ impl Transform {
                 warn!("Rotate with tile not currently supported. Skipping rotate operation.");
             }
 
-            if self.translate.is_some() {
+            if self.translation.is_some() {
+                warn!(
+                    "Translation with tile not currently supported. Skipping translate operation."
+                );
+            }
+
+            if self.translation.is_some() {
                 warn!(
                     "Translation with tile not currently supported. Skipping translate operation."
                 );
@@ -102,22 +126,54 @@ impl Transform {
     }
 
     pub fn set_rot_degrees(&mut self, deg: f32) {
-        self.rotate_deg = Some(deg);
+        if self.initial_rotate_deg.is_some() && self.initial_rotate_deg.unwrap() == deg {
+            trace!("Rotate already set.");
+        } else {
+            self.initial_rotate_deg = Some(deg);
+            self.rotate_deg = Some(deg);
+        }
 
         if self.tile {
             warn!("Rotate with tile not currently supported. Skipping rotate operation.");
         }
     }
 
+    // rps: rotations per second. 0. = stationary, 0.5 = 180deg/s, -0.5 = -180deg/s
+    pub fn set_spin(&mut self, rps: f32) {
+        self.rps = Some(rps);
+        self.set_rot_degrees(0.); // initialize rotation
+    }
+
     pub fn translate_by(&mut self, x: i32, y: i32) {
-        self.translate = Some((x, y));
+        let trans = (x, y);
+        if self.initial_translation.is_some() && self.initial_translation.unwrap() == trans {
+            trace!("Translation already set.");
+        } else {
+            self.initial_translation = Some(trans);
+            self.translation = Some(trans);
+        }
 
         if self.tile {
             warn!("Translation with tile not currently supported. Skipping translate operation.");
         }
     }
 
-    pub fn execute(&self, gpu: &mut GpuExecutor, tex: &wgpu::Texture) -> Result<wgpu::Texture> {
+    // velocity: pixels/s of travel
+    // angle: clockwise degrees of initial vector
+    pub fn set_drift(&mut self, velocity: f32, angle: f32) {
+        let drift_vec = (velocity, angle);
+
+        if self.initial_drift_vec.is_some() && self.initial_drift_vec.unwrap() == drift_vec {
+            trace!("Drift already set.");
+        } else {
+            self.initial_drift_vec = Some(drift_vec);
+            self.drift_vec = Some(drift_vec);
+        }
+
+        self.translate_by(0, 0); // initalize translation
+    }
+
+    pub fn execute(&mut self, gpu: &mut GpuExecutor, tex: &wgpu::Texture) -> Result<wgpu::Texture> {
         let span = span!(Level::INFO, "Transform#execute");
         let _guard = span.enter();
 
@@ -229,6 +285,7 @@ impl Transform {
                 label: Some("encoder"),
             });
 
+        self.tick(tex);
         let vertices = self.vertices(tex);
 
         let vertex_buffer = gpu
@@ -306,6 +363,66 @@ impl Transform {
         vertex_groups.concat()
     }
 
+    fn tick(&mut self, tex: &wgpu::Texture) {
+        // animate spin and drift since last iteration
+        match self.last_tick {
+            Some(last) => {
+                if self.rps.is_some() {
+                    let rps = self.rps.unwrap();
+                    let old_rot = self.rotate_deg.unwrap();
+                    self.rotate_deg = Some(old_rot + 360. * rps * last.elapsed().as_secs_f32());
+                }
+
+                if self.drift_vec.is_some() {
+                    let (vel, ang) = self.drift_vec.unwrap();
+                    let hyp = vel * last.elapsed().as_secs_f32();
+                    let dy = (ang.to_radians().cos() * hyp).round() as i32;
+                    let dx = (ang.to_radians().sin() * hyp).round() as i32;
+                    let (tx, ty) = self.translation.unwrap();
+
+                    let center = self.shape.center();
+                    let center_x = center.x as i32;
+                    let center_y = center.y as i32;
+                    let cur_x = center_x + tx;
+                    let cur_y = center_y + ty;
+
+                    let mut next_x = cur_x + dx;
+                    let mut next_y = cur_y + dy;
+
+                    let mut next_ang = ang;
+                    let width = tex.width() as i32;
+                    let height = tex.height() as i32;
+
+                    if next_x >= width {
+                        next_x -= next_x - width;
+                        next_ang = mirror_x(next_ang);
+                    }
+
+                    if next_x < 0 {
+                        next_x *= -1;
+                        next_ang = mirror_x(next_ang);
+                    }
+
+                    if next_y >= height {
+                        next_y -= next_y - height;
+                        next_ang = mirror_y(next_ang);
+                    }
+
+                    if next_y < 0 {
+                        next_y *= -1;
+                        next_ang = mirror_y(next_ang);
+                    }
+
+                    self.drift_vec = Some((vel, next_ang));
+                    self.translation = Some((next_x - center_x, next_y - center_y));
+                }
+            }
+            None => (),
+        }
+
+        self.last_tick = Some(Instant::now());
+    }
+
     fn vertices_for_shapes(&self, tex: &wgpu::Texture, src: &Shape, dest: &Shape) -> Vec<Vertex> {
         let width = tex.width() as f32;
         let height = tex.height() as f32;
@@ -368,6 +485,7 @@ impl Transform {
         rects.concat()
     }
 
+    // FIXME: translate + rotate causes rotation about original center, not translated center
     fn scale_rotate_flip(
         &self,
         vertices: &mut Vec<Vertex>,
@@ -418,7 +536,7 @@ impl Transform {
             }
         }
 
-        let trans = Vertex::new(&match self.translate {
+        let trans = Vertex::new(&match self.translation {
             None => [0., 0.],
             Some(t) => [t.0 as f32 / width as f32, -1. * t.1 as f32 / height as f32],
         });
@@ -456,7 +574,7 @@ impl Transform {
 
         // TODO: scale, rotate, translate support for tiling
         if !self.tile {
-            if self.translate.is_some() {
+            if self.translation.is_some() {
                 v.add(&trans);
             }
 
@@ -504,4 +622,16 @@ fn flip(val: f32, min: f32, max: f32) -> f32 {
     // Invert val within range
     let res = min + max - val;
     res.min(max).max(min)
+}
+
+fn mirror_x(degrees: f32) -> f32 {
+    360. - degrees
+}
+
+fn mirror_y(degrees: f32) -> f32 {
+    if degrees >= 180. {
+        540. - degrees
+    } else {
+        180. - degrees
+    }
 }

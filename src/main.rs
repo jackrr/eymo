@@ -54,7 +54,7 @@ fn main() -> Result<()> {
     let mut output_stream = OutputVideoStream::new(resolution.width(), resolution.height())?;
     let mut gpu = GpuExecutor::new()?;
 
-    let interpreter = lang::parse(&std::fs::read_to_string("config.txt")?)?;
+    let mut interpreter = lang::parse(&std::fs::read_to_string("config.txt")?)?;
 
     loop {
         let span = span!(Level::INFO, "frame_loop_iter");
@@ -77,7 +77,7 @@ fn main() -> Result<()> {
             &mut gpu,
             &mut pipeline,
             args.max_frame_lag_ms,
-            &interpreter,
+            &mut interpreter,
         ) {
             Ok(img) => {
                 // ~1-2ms
@@ -104,7 +104,7 @@ fn process_frame(
     gpu: &mut GpuExecutor,
     pipeline: &mut Pipeline,
     within_ms: u32,
-    interpreter: &lang::Interpreter,
+    interpreter: &mut lang::Interpreter,
 ) -> Result<RgbaImage> {
     let span = span!(Level::INFO, "process_frame");
     let _guard = span.enter();
@@ -124,14 +124,9 @@ fn process_frame(
     // TODO: make check time return image early instead of erroring
     check_time(within_ms, start, "Face Detection")?;
 
-    let transforms = interpreter.transforms(&detection);
-
-    let mut output = texture;
-    for (idx, transform) in transforms.iter().enumerate() {
-        output = transform.execute(gpu, &output)?;
-        check_time(within_ms, start, &format!("Image Manipulation {idx}"))?;
-    }
-
+    // TODO: check time calls
+    // check_time(within_ms, start, &format!("Image Manipulation {idx}"))?;
+    let output = interpreter.execute(&detection, texture, gpu)?;
     let img = rgb::texture_to_rgba(gpu, &output);
 
     Ok(img)

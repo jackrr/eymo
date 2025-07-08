@@ -62,20 +62,14 @@ Operation: Operation = {
 		"drift" => Operation::Drift(0.5, 45.),
 		"drift(" <a:Float> ")" => Operation::Drift(a, 45.),
 		"drift(" <a:Float> r" *, *" <v:Float> ")" => Operation::Drift(<>),
-		"spin" => Operation::Spin(0.5, false),
-		"spin(" <v:Float> ")" => Operation::Spin(v, false),
-		"spin(" <v:Float> r" *, *" <b:Bool> ")" => Operation::Spin(<>),
+		"spin" => Operation::Spin(0.5),
+		"spin(" <v:Float> ")" => Operation::Spin(v),
 };
 
 FlipVariant: FlipVariant = {
     "both" => FlipVariant::Both,
 		"vertical" => FlipVariant::Vertical,
 		"horizontal" => FlipVariant::Horizontal,
-};
-
-Bool: bool = {
-    "true" => true,
-		"false" => false,
 };
 
 Num: u32 = {

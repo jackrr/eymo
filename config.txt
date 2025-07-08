@@ -1,5 +1,5 @@
-leye: translate(100, -80)
-mouth#1: swap_with(mouth#0)
-mouth#0: scale(2.5), write_to(leye_region), swap_with(reye)
-
+leye: translate(70, -80), scale(4.)
+mouth: drift(100., 45.), spin(0.2)
+mouth: scale(2.), swap_with(leye), copy_to(reye)
+// mouth: translate(100, 100), rotate(90.)
 

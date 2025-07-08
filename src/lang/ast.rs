@@ -4,7 +4,13 @@ pub use crate::transform::FlipVariant;
 // TODO: Add clear statement
 // TODO: Add ability to invert shape (on transform and lang)
 #[derive(Debug)]
-pub struct Statement {
+pub enum Statement {
+    Transform(Transform),
+    Clear(Option<Vec<u32>>),
+}
+
+#[derive(Debug)]
+pub struct Transform {
     pub shape: Shape,
     pub operations: Vec<Operation>,
 }
@@ -43,4 +49,6 @@ pub enum Operation {
     SwapWith(Shape),
     Translate(i32, i32),
     Flip(FlipVariant),
+    Drift(f32, f32),
+    Spin(f32, bool),
 }

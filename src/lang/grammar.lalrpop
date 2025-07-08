@@ -1,4 +1,4 @@
-use crate::lang::ast::{Statement, Shape, FaceRef, FacePart, Operation, FlipVariant};
+use crate::lang::ast::{Statement, Transform, Shape, FaceRef, FacePart, Operation, FlipVariant};
 use crate::shapes::rect::Rect;
 use std::str::FromStr;
 
@@ -18,7 +18,18 @@ match {
 pub Statements = WhitespaceDelim<Statement>;
 
 pub Statement: Statement = {
-    <shape:Shape> r": *" <operations:Operations> => Statement {<>}
+		<t:Transform> => Statement::Transform(<>),
+		<c:Clear> => Statement::Clear(<>),
+};
+
+Clear: Option<Vec<u32>> = {
+    "clear" => None,
+		"clear(" <idx:CommaDelim<Num>> ")" => Some(<>),
+};
+
+
+Transform: Transform = {
+    <shape:Shape> r": *" <operations:Operations> => Transform {<>}
 };
 
 Shape: Shape = {
@@ -47,13 +58,24 @@ Operation: Operation = {
 		"write_to(" <s:CommaDelim<Shape>> ")" => Operation::WriteTo(s),
 		"swap_with(" <s:Shape> ")" => Operation::SwapWith(s),
 		"translate(" <x:Int> r" *, *" <y:Int> ")" => Operation::Translate(<>),
-		"flip(" <fv:FlipVariant> ")" => Operation::Flip(fv)
+		"flip(" <fv:FlipVariant> ")" => Operation::Flip(fv),
+		"drift" => Operation::Drift(0.5, 45.),
+		"drift(" <a:Float> ")" => Operation::Drift(a, 45.),
+		"drift(" <a:Float> r" *, *" <v:Float> ")" => Operation::Drift(<>),
+		"spin" => Operation::Spin(0.5, false),
+		"spin(" <v:Float> ")" => Operation::Spin(v, false),
+		"spin(" <v:Float> r" *, *" <b:Bool> ")" => Operation::Spin(<>),
 };
 
 FlipVariant: FlipVariant = {
     "both" => FlipVariant::Both,
 		"vertical" => FlipVariant::Vertical,
 		"horizontal" => FlipVariant::Horizontal,
+};
+
+Bool: bool = {
+    "true" => true,
+		"false" => false,
 };
 
 Num: u32 = {

@@ -18,6 +18,10 @@ pub fn parse(input: &str) -> Result<Interpreter> {
     }
 }
 
+// TODO: maintain mapping of statements and current state,
+// allowing transforms to "save" state into mapping,
+// and forwarding that state into the transform for next iteration
+// (for spin + drift)
 #[derive(Debug)]
 pub struct Interpreter {
     statements: Vec<Statement>,
@@ -40,17 +44,24 @@ impl Interpreter {
 
         for statement in &self.statements {
             trace!("Handling statement {statement:?}");
-            match build_transforms(statement, detection) {
-                Ok(mut ts) => transforms.append(&mut ts),
-                Err(e) => warn!("{e:?}"),
-            };
+            match statement {
+                Statement::Transform(t) => {
+                    match build_transforms(t, detection) {
+                        Ok(mut ts) => transforms.append(&mut ts),
+                        Err(e) => warn!("{e:?}"),
+                    };
+                }
+                Statement::Clear(idxs) => {
+                    warn!("TODO: Clear handler not implemented!");
+                }
+            }
         }
 
         transforms
     }
 }
 
-fn build_transforms(statement: &Statement, detection: &Detection) -> Result<Vec<Transform>> {
+fn build_transforms(statement: &ast::Transform, detection: &Detection) -> Result<Vec<Transform>> {
     match &statement.shape {
         ast::Shape::Rect(r) => {
             let mut t = Transform::new(r.clone());
@@ -81,7 +92,7 @@ fn build_transforms(statement: &Statement, detection: &Detection) -> Result<Vec<
 
 fn apply_operations(
     t: &mut Transform,
-    statement: &Statement,
+    statement: &ast::Transform,
     detection: &Detection,
     face: Option<&Face>,
 ) {
@@ -129,6 +140,9 @@ fn apply_operations(
             },
             Operation::Translate(x, y) => t.translate_by(*x, *y),
             Operation::Flip(v) => t.set_flip(*v),
+            // TODO: state for drift and spin
+            Operation::Drift(velocity, angle) => t.set_drift(velocity, angle),
+            Operation::Spin(velocity, counter_clockwise) => t.set_spin(velocity, counter_clockwise),
         }
     }
 }

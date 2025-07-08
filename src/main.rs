@@ -4,7 +4,6 @@ use clap::Parser;
 use image::RgbaImage;
 use imggpu::gpu::GpuExecutor;
 use imggpu::rgb;
-use lang::ast::Statement;
 use nokhwa::pixel_format::RgbAFormat;
 use nokhwa::Buffer;
 use num_cpus::get as get_cpu_count;

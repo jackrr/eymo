@@ -11,8 +11,9 @@ use pipeline::Pipeline;
 use std::path::PathBuf;
 use std::time::Instant;
 use tracing::{debug, error, span, trace, warn, Level};
-use tracing_subscriber::fmt;
+use tracing_subscriber;
 use tracing_subscriber::fmt::format::FmtSpan;
+use tracing_subscriber::EnvFilter;
 use video::{create_input_stream, OutputVideoStream};
 mod imggpu;
 mod lang;
@@ -47,9 +48,11 @@ struct Args {
 }
 
 fn main() -> Result<()> {
-    fmt::fmt()
+    let filter = EnvFilter::from_default_env();
+    tracing_subscriber::fmt()
         .with_span_events(FmtSpan::CLOSE)
         .with_target(false)
+        .with_env_filter(filter)
         .init();
 
     let args = Args::parse();

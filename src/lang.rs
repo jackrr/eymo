@@ -36,18 +36,29 @@ impl Interpreter {
         }
     }
 
-    pub fn execute(
+    pub fn execute<F>(
         &mut self,
         detection: &Detection,
         tex: wgpu::Texture,
         gpu: &mut GpuExecutor,
-    ) -> Result<wgpu::Texture> {
+        timeout_check: F,
+    ) -> Result<wgpu::Texture>
+    where
+        F: Fn(&str) -> Result<()>,
+    {
         let mut output = tex;
-        // TODO: expose pattern for checking time / halting exec
+        // FIXME: this will cause state loss on timeout
         let mut prev_transforms = std::mem::replace(&mut self.transforms, HashMap::new());
 
         for (idx, statement) in self.statements.iter().enumerate() {
-            trace!("Handling statement {statement:?}");
+            match timeout_check(&format!("Transform {idx}")) {
+                Ok(_) => trace!("Handling statement {statement:?}"),
+                Err(e) => {
+                    warn!("{e:?}");
+                    return Ok(output);
+                }
+            };
+
             match statement {
                 Statement::Transform(s) => {
                     match build_transforms(&s, detection, idx, &mut prev_transforms) {

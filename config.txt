@@ -1,5 +1,7 @@
-leye: translate(70, -80), scale(4.)
-mouth: drift(100., 45.), spin(0.2)
-mouth: scale(2.), swap_with(leye), copy_to(reye)
-// mouth: translate(100, 100), rotate(90.)
+// leye: translate(20, -40), scale(4.)
+mouth: drift(200, 45), spin(0.4), scale(2.5)
+leye: drift(150, -45), scale(5)
+reye: drift(150, 170), scale(5)
+// mouth: scale(2.), swap_with(leye), copy_to(reye)
+// mouth: translate(100, -100), rotate(90), scale(3)
 

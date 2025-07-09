@@ -88,7 +88,7 @@ pub fn texture_to_tensor(
     texture: &wgpu::Texture,
     output_range: OutputRange,
 ) -> Result<Tensor<f32>> {
-    let span = span!(Level::INFO, "texture_to_tensor");
+    let span = span!(Level::DEBUG, "texture_to_tensor");
     let _guard = span.enter();
 
     let shader_code = wgpu::include_wgsl!("rgb.wgsl");

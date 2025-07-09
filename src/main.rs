@@ -12,7 +12,6 @@ use std::time::Instant;
 use tracing::{debug, error, span, trace, warn, Level};
 use tracing_subscriber::fmt;
 use tracing_subscriber::fmt::format::FmtSpan;
-use transform::Transform;
 use video::{create_input_stream, OutputVideoStream};
 mod imggpu;
 mod lang;
@@ -60,7 +59,7 @@ fn main() -> Result<()> {
         let span = span!(Level::INFO, "frame_loop_iter");
         let _guard = span.enter();
 
-        let get_frame_span = span!(Level::INFO, "get_frame");
+        let get_frame_span = span!(Level::DEBUG, "get_frame");
         let get_frame_guard = get_frame_span.enter();
         let result = camera.frame();
         let frame = match result {
@@ -81,7 +80,7 @@ fn main() -> Result<()> {
         ) {
             Ok(img) => {
                 // ~1-2ms
-                let write_frame_span = span!(Level::INFO, "write_frame");
+                let write_frame_span = span!(Level::DEBUG, "write_frame");
                 let write_frame_guard = write_frame_span.enter();
                 match output_stream.write_frame(img) {
                     Ok(_) => trace!("Rendered frame."),
@@ -106,13 +105,13 @@ fn process_frame(
     within_ms: u32,
     interpreter: &mut lang::Interpreter,
 ) -> Result<RgbaImage> {
-    let span = span!(Level::INFO, "process_frame");
+    let span = span!(Level::DEBUG, "process_frame");
     let _guard = span.enter();
     let start = Instant::now();
 
-    // WOAH: 24ms
+    // WOAH: 15-40ms
     // TODO: Is there a faster camera format/decode solution
-    let decode_nokwha_buff_span = span!(Level::INFO, "decode_nokwha_buff");
+    let decode_nokwha_buff_span = span!(Level::DEBUG, "decode_nokwha_buff");
     let decode_nokwha_buff_guard = decode_nokwha_buff_span.enter();
     let input_img: RgbaImage = frame.decode_image::<RgbAFormat>()?;
 
@@ -121,12 +120,18 @@ fn process_frame(
     drop(decode_nokwha_buff_guard);
 
     let detection = pipeline.run_gpu(&texture, gpu)?;
-    // TODO: make check time return image early instead of erroring
-    check_time(within_ms, start, "Face Detection")?;
 
-    // TODO: check time calls
-    // check_time(within_ms, start, &format!("Image Manipulation {idx}"))?;
-    let output = interpreter.execute(&detection, texture, gpu)?;
+    match check_time(within_ms, start, "Face Detection") {
+        Ok(_) => {}
+        Err(e) => {
+            error!("{e:?}");
+            return Ok(rgb::texture_to_rgba(gpu, &texture));
+        }
+    };
+
+    let output = interpreter.execute(&detection, texture, gpu, |waypoint| {
+        check_time(within_ms, start, waypoint)
+    })?;
     let img = rgb::texture_to_rgba(gpu, &output);
 
     Ok(img)

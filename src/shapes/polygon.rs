@@ -8,7 +8,6 @@ pub struct Polygon {
 }
 
 impl Polygon {
-    // Points assumed to be provided in clockwise order...
     pub fn new(points: Vec<Point>) -> Self {
         Self { points }
     }
@@ -31,16 +30,16 @@ impl Polygon {
             .fold(self.points[0].y, |min, p| min.min(p.y))
     }
 
-    pub fn min_x(&self) -> u32 {
-        self.points
-            .iter()
-            .fold(self.points[0].x, |min, p| min.min(p.x))
-    }
-
     pub fn max_y(&self) -> u32 {
         self.points
             .iter()
             .fold(self.points[0].y, |max, p| max.max(p.y))
+    }
+
+    pub fn min_x(&self) -> u32 {
+        self.points
+            .iter()
+            .fold(self.points[0].x, |min, p| min.min(p.x))
     }
 
     pub fn max_x(&self) -> u32 {

@@ -9,7 +9,7 @@ use crate::shapes::polygon::Polygon;
 use crate::shapes::rect::Rect;
 use anyhow::Result;
 use ort::session::SessionOutputs;
-use tracing::{info, span, Level};
+use tracing::{debug, span, Level};
 use wgpu::util::DeviceExt;
 
 pub struct FaceLandmarker {
@@ -65,7 +65,7 @@ impl FaceLandmarker {
         let _guard = span.enter();
 
         let theta = face.rot_theta();
-        info!("Tilt: {}", theta.to_degrees());
+        debug!("Tilt: {}", theta.to_degrees());
         let mut bounds = face.bounds.clone();
         // pad 30% vertically
         bounds = bounds.scale_y(1.6, tex.height());

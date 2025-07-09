@@ -74,7 +74,7 @@ impl FaceDetector {
 
     pub fn run_gpu(&mut self, tex: &wgpu::Texture, gpu: &mut GpuExecutor) -> Result<Vec<Face>> {
         // TODO: CLEAN ME UP
-        let span = span!(Level::INFO, "face_detector");
+        let span = span!(Level::DEBUG, "face_detector");
         let _guard = span.enter();
 
         let sampler = gpu.device.create_sampler(&wgpu::SamplerDescriptor {

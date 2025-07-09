@@ -38,7 +38,7 @@ impl Pipeline {
     }
 
     pub fn run_gpu(&mut self, tex: &wgpu::Texture, gpu: &mut GpuExecutor) -> Result<Detection> {
-        let span = span!(Level::INFO, "pipeline");
+        let span = span!(Level::DEBUG, "pipeline");
         let _guard = span.enter();
 
         let face_bounds = self.face_detector.run_gpu(tex, gpu)?;

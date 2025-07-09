@@ -1,6 +1,6 @@
 #![warn(unused_extern_crates)]
 use anyhow::{Error, Result};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use image::RgbaImage;
 use imggpu::gpu::GpuExecutor;
 use imggpu::rgb;
@@ -24,14 +24,24 @@ mod video;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    #[arg(short, long)]
+    /// Max threads to fanout work onto
+    #[arg(short = 't', long)]
     threads: Option<usize>,
 
-    #[arg(short, long, default_value = "500")]
+    /// Max delay (ms) before timing out processing a thread
+    #[arg(short = 'l', long, default_value = "500")]
     max_frame_lag_ms: u32,
 
-    #[arg(short, long, default_value = "30")]
+    /// Target frame rate
+    #[arg(long, default_value = "30")]
     fps: u32,
+
+    // Example for config file
+    // #[arg(short, long, value_name = "FILE")]
+    // config: Option<PathBuf>,
+    /// Loopback device to write to. Displays in window if unset.
+    #[arg(short, long)]
+    device: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -46,11 +56,11 @@ fn main() -> Result<()> {
     let total_threads = args.threads.unwrap_or(total_threads).min(total_threads);
     let mut pipeline = Pipeline::new(total_threads / 2)?;
 
-    // TODO: allow arg to specify a video source
     let mut camera = create_input_stream(args.fps)?;
 
     let resolution = camera.resolution();
-    let mut output_stream = OutputVideoStream::new(resolution.width(), resolution.height())?;
+    let mut output_stream =
+        OutputVideoStream::new(resolution.width(), resolution.height(), args.device)?;
     let mut gpu = GpuExecutor::new()?;
 
     let mut interpreter = lang::parse(&std::fs::read_to_string("config.txt")?)?;

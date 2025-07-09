@@ -34,37 +34,64 @@ pub fn create_input_stream(fps: u32) -> Result<Camera> {
 }
 
 pub struct OutputVideoStream {
-    ffplay: std::process::Child,
+    output_proc: std::process::Child,
 }
 
 impl OutputVideoStream {
-    // TODO: make configurable to enable pipewire, whatever is used on mac
-    pub fn new(width: u32, height: u32) -> Result<Self> {
-        let ffplay = Command::new("ffplay")
-            .args(&[
-                "-f",
-                "rawvideo",
-                "-pixel_format",
-                "rgba",
-                "-video_size",
-                &format!("{}x{}", width, height),
-                // "-framerate",
-                // "60",
-                "-fflags",
-                "nobuffer",
-                "-flags",
-                "low_delay",
-                "-",
-            ])
+    pub fn new(width: u32, height: u32, device: Option<String>) -> Result<Self> {
+        let mut command = match device {
+            Some(d) => {
+                let mut command = Command::new("ffmpeg");
+                command.args(&[
+                    "-f",
+                    "rawvideo",
+                    "-pix_fmt",
+                    "rgba",
+                    "-s",
+                    &format!("{}x{}", width, height),
+                    "-i",
+                    "-",
+                    "-map",
+                    "0:v",
+                    "-preset",
+                    "fast",
+                    "-vf",
+                    "format=yuv420p",
+                    "-f",
+                    "v4l2",
+                    &format!("/dev/{d}"),
+                ]);
+                command
+            }
+            None => {
+                let mut command = Command::new("ffplay");
+                command.args(&[
+                    "-f",
+                    "rawvideo",
+                    "-pixel_format",
+                    "rgba",
+                    "-video_size",
+                    &format!("{}x{}", width, height),
+                    "-fflags",
+                    "nobuffer",
+                    "-flags",
+                    "low_delay",
+                    "-",
+                ]);
+                command
+            }
+        };
+        let output_proc = command
             .stdin(Stdio::piped())
-            .stderr(Stdio::null())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
             .spawn()?;
 
-        Ok(Self { ffplay })
+        Ok(Self { output_proc })
     }
 
     pub fn write_frame(&mut self, img: RgbaImage) -> Result<()> {
-        if let Some(stdin) = self.ffplay.stdin.as_mut() {
+        if let Some(stdin) = self.output_proc.stdin.as_mut() {
             stdin.write_all(img.as_bytes())?;
             stdin.flush()?;
         }
@@ -73,8 +100,8 @@ impl OutputVideoStream {
     }
 
     pub fn close(mut self) -> Result<()> {
-        drop(self.ffplay.stdin.take());
-        self.ffplay.wait()?;
+        drop(self.output_proc.stdin.take());
+        self.output_proc.wait()?;
         Ok(())
     }
 }

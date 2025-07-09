@@ -8,6 +8,7 @@ use nokhwa::pixel_format::RgbAFormat;
 use nokhwa::Buffer;
 use num_cpus::get as get_cpu_count;
 use pipeline::Pipeline;
+use std::path::PathBuf;
 use std::time::Instant;
 use tracing::{debug, error, span, trace, warn, Level};
 use tracing_subscriber::fmt;
@@ -36,9 +37,10 @@ struct Args {
     #[arg(long, default_value = "30")]
     fps: u32,
 
-    // Example for config file
-    // #[arg(short, long, value_name = "FILE")]
-    // config: Option<PathBuf>,
+    /// Config file to read from
+    #[arg(short, long, value_name = "FILE", default_value = "config.txt")]
+    config: PathBuf,
+
     /// Loopback device to write to. Displays in window if unset.
     #[arg(short, long)]
     device: Option<String>,
@@ -63,7 +65,7 @@ fn main() -> Result<()> {
         OutputVideoStream::new(resolution.width(), resolution.height(), args.device)?;
     let mut gpu = GpuExecutor::new()?;
 
-    let mut interpreter = lang::parse(&std::fs::read_to_string("config.txt")?)?;
+    let mut interpreter = lang::parse(&std::fs::read_to_string(args.config)?)?;
 
     loop {
         let span = span!(Level::INFO, "frame_loop_iter");

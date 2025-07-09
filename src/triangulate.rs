@@ -1,9 +1,7 @@
 use core::f32;
 
 use crate::imggpu::vertex::Vertex;
-use image::{Rgb, RgbImage};
-use imageproc::drawing::draw_filled_circle;
-use tracing::{info, span, Level};
+use tracing::{span, Level};
 
 /*
 ISC License

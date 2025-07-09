@@ -1,7 +1,6 @@
-use super::point::{Point, PointF32};
+use super::point::Point;
 use super::polygon::Polygon;
 
-// TODO: make rect generic to u32 or f32
 #[derive(Debug, Copy, Clone)]
 pub struct Rect {
     // centerpoint
@@ -40,25 +39,13 @@ impl PartialEq for Rect {
     }
 }
 
-#[allow(dead_code)]
 impl RectF32 {
-    pub fn from_center(xc: f32, yc: f32, w: f32, h: f32) -> RectF32 {
-        RectF32 { x: xc, y: yc, w, h }
-    }
-
     pub fn default() -> RectF32 {
         RectF32 {
             x: 1.,
             y: 1.,
             w: 1.,
             h: 1.,
-        }
-    }
-
-    pub fn center(&self) -> PointF32 {
-        PointF32 {
-            x: self.x,
-            y: self.y,
         }
     }
 
@@ -109,7 +96,6 @@ impl From<Rect> for Polygon {
     }
 }
 
-#[allow(dead_code)]
 impl Rect {
     pub fn left(&self) -> u32 {
         self.x - self.w / 2
@@ -146,13 +132,6 @@ impl Rect {
             Point::new(l, b),
             Point::new(r, b),
         ])
-    }
-
-    pub fn resize(&mut self, width: u32, height: u32) -> Self {
-        self.w = width;
-        self.h = height;
-
-        *self
     }
 
     pub fn scale_x(&mut self, mag: f32, max: u32) -> Rect {
@@ -193,12 +172,6 @@ impl Rect {
             w,
             h,
         }
-    }
-
-    pub fn from_center(xc: u32, yc: u32, w: u32, h: u32) -> Self {
-        let left: u32 = (xc as i32 - w as i32 / 2).max(0) as u32;
-        let top: u32 = (yc as i32 - h as i32 / 2).max(0) as u32;
-        Self::from_tl(left, top, w, h)
     }
 
     pub fn overlap_pct(&self, other: &Rect) -> f32 {

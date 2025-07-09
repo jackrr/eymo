@@ -1,6 +1,6 @@
 #![warn(unused_extern_crates)]
 use anyhow::{Error, Result};
-use clap::{Parser, ValueEnum};
+use clap::Parser;
 use image::RgbaImage;
 use imggpu::gpu::GpuExecutor;
 use imggpu::rgb;

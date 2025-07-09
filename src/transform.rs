@@ -32,6 +32,7 @@ pub struct Transform {
     last_tick: Option<Instant>,
     drift_vec: Option<(f32, f32)>,
     initial_drift_vec: Option<(f32, f32)>,
+    erase: bool,
 }
 
 impl Default for Transform {
@@ -52,6 +53,7 @@ impl Default for Transform {
             last_tick: None,
             drift_vec: None,
             initial_drift_vec: None,
+            erase: false,
         }
     }
 }
@@ -74,6 +76,14 @@ impl Transform {
 
     pub fn set_flip(&mut self, f: FlipVariant) {
         self.flip = Some(f);
+    }
+
+    pub fn set_erase(&mut self, e: bool) {
+        self.erase = e;
+
+        if self.tile {
+            warn!("Erase with tile not currently supported. Skipping erase operation.");
+        }
     }
 
     pub fn copy_to(&mut self, dests: impl Into<Vec<Shape>>) {
@@ -418,7 +428,186 @@ impl Transform {
             vertex_groups.push(self.vertices_for_shapes(tex, &self.shape, &self.shape));
         }
 
+        if self.erase {
+            vertex_groups.push(self.blend_fill(tex));
+        }
+
         vertex_groups.concat()
+    }
+
+    fn blend_fill(&self, tex: &wgpu::Texture) -> Vec<Vertex> {
+        // Pull from texture coordinates _outside_ shape
+
+        let width = tex.width() as f32;
+        let height = tex.height() as f32;
+        let make_vtx = |sp: Point, op: Point| -> Vertex {
+            let x = op.x as f32 / width;
+            let y = op.y as f32 / height;
+            Vertex::new_with_tex(
+                &[x * 2. - 1., 1. - y * 2.],
+                &[sp.x as f32 / width, sp.y as f32 / height],
+            )
+        };
+
+        let bounds: Rect = self.shape.clone().into();
+        // break vertices into 4 quadrants around centerpoint
+        // each quadrant samples from small region just "outside" shape
+        // configure region size as a percentage of quadrant size in that dimension
+        let blend_factor = 0.1; // ratio of input shape size to pull from outside
+        let x_pad = (bounds.w as f32 * blend_factor).round() as u32;
+        let y_pad = (bounds.h as f32 * blend_factor).round() as u32;
+
+        let b = bounds.bottom().saturating_sub(y_pad);
+        let t = bounds.top() + y_pad;
+        let l = bounds.left().saturating_sub(x_pad);
+        let r = bounds.right() + x_pad;
+
+        let center = bounds.center();
+        let top = make_vtx(
+            Point { x: center.x, y: b },
+            Point {
+                x: center.x,
+                y: bounds.bottom(),
+            },
+        );
+        let bottom = make_vtx(
+            Point { x: center.x, y: t },
+            Point {
+                x: center.x,
+                y: bounds.top(),
+            },
+        );
+        let left = make_vtx(
+            Point { x: l, y: center.y },
+            Point {
+                x: bounds.left(),
+                y: center.y,
+            },
+        );
+
+        let right = make_vtx(
+            Point { x: r, y: center.y },
+            Point {
+                x: bounds.right(),
+                y: center.y,
+            },
+        );
+
+        let mut quads: Vec<Vec<Vertex>> = vec![
+            vec![
+                make_vtx(
+                    Point {
+                        x: bounds.right(),
+                        y: bounds.bottom(),
+                    },
+                    center,
+                ),
+                top.clone(),
+                right.clone(),
+            ], // tr
+            vec![
+                make_vtx(
+                    Point {
+                        x: bounds.right(),
+                        y: bounds.top(),
+                    },
+                    center,
+                ),
+                bottom.clone(),
+                right.clone(),
+            ], // br
+            vec![
+                make_vtx(
+                    Point {
+                        x: bounds.left(),
+                        y: bounds.top(),
+                    },
+                    center,
+                ),
+                bottom.clone(),
+                left.clone(),
+            ], // bl
+            vec![
+                make_vtx(
+                    Point {
+                        x: bounds.left(),
+                        y: bounds.bottom(),
+                    },
+                    center,
+                ),
+                top.clone(),
+                left.clone(),
+            ], // tl
+        ];
+
+        let quart = (width / 4.).round() as u32;
+
+        for p in self.shape.points() {
+            if p.x >= center.x {
+                // r
+                if p.y < center.y {
+                    // t
+                    // blow "out" of shape by pads, flipped for quadrant
+                    if p.x - center.x > quart {
+                        // place on right edge
+                        quads[0].push(make_vtx(
+                            Point {
+                                x: r,
+                                y: p.y.saturating_sub(y_pad),
+                            },
+                            p,
+                        ));
+                    } else {
+                        // place on top edge
+                        quads[0].push(make_vtx(
+                            Point {
+                                x: p.x + x_pad,
+                                y: b,
+                            },
+                            p,
+                        ));
+                    }
+                } else {
+                    // b
+                    quads[1].push(make_vtx(
+                        Point {
+                            x: p.x + x_pad,
+                            y: p.y + y_pad,
+                        },
+                        p,
+                    ));
+                }
+            } else {
+                // l
+                if p.y >= center.y {
+                    // b
+                    quads[2].push(make_vtx(
+                        Point {
+                            x: p.x.saturating_sub(x_pad),
+                            y: p.y + y_pad,
+                        },
+                        p,
+                    ));
+                } else {
+                    // t
+                    quads[3].push(make_vtx(
+                        Point {
+                            x: p.x.saturating_sub(x_pad),
+                            y: p.y.saturating_sub(y_pad),
+                        },
+                        p,
+                    ));
+                }
+            }
+        }
+
+        let mut res = Vec::new();
+        for q in quads {
+            let mut tris = Vertex::to_triangles(q);
+            res.append(&mut tris);
+        }
+
+        res
     }
 
     fn vertices_for_shapes(&self, tex: &wgpu::Texture, src: &Shape, dest: &Shape) -> Vec<Vertex> {

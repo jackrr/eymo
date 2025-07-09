@@ -64,6 +64,7 @@ Operation: Operation = {
 		"drift(" <a:Float> r" *, *" <v:Float> ")" => Operation::Drift(<>),
 		"spin" => Operation::Spin(0.5),
 		"spin(" <v:Float> ")" => Operation::Spin(v),
+		"erase" => Operation::Erase,
 };
 
 FlipVariant: FlipVariant = {

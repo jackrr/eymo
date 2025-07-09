@@ -2,7 +2,6 @@ use crate::shapes::rect::Rect;
 pub use crate::transform::FlipVariant;
 
 // TODO: Add clear statement
-// TODO: Add ability to invert shape (on transform and lang)
 #[derive(Debug)]
 pub enum Statement {
     Transform(Transform),
@@ -38,7 +37,6 @@ pub enum FacePart {
     Nose,
 }
 
-// TODO: Add fill operation + transform
 #[derive(Debug)]
 pub enum Operation {
     Tile,
@@ -51,4 +49,5 @@ pub enum Operation {
     Flip(FlipVariant),
     Drift(f32, f32),
     Spin(f32),
+    Erase,
 }

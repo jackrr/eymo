@@ -195,6 +195,7 @@ fn apply_operations(
             Operation::Flip(v) => t.set_flip(*v),
             Operation::Drift(velocity, angle) => t.set_drift(*velocity, *angle),
             Operation::Spin(velocity) => t.set_spin(*velocity),
+            Operation::Erase => t.set_erase(true),
         }
     }
 }

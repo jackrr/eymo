@@ -73,7 +73,6 @@ impl FaceDetector {
     }
 
     pub fn run_gpu(&mut self, tex: &wgpu::Texture, gpu: &mut GpuExecutor) -> Result<Vec<Face>> {
-        // TODO: CLEAN ME UP
         let span = span!(Level::DEBUG, "face_detector");
         let _guard = span.enter();
 
@@ -239,8 +238,6 @@ impl FaceDetector {
                 let x_scale = input_width as f32 / resized_width as f32;
                 let y_scale = input_height as f32 / resized_height as f32;
 
-                // TODO: gen_anchor needs work...
-                // let mut anchor = gen_anchor(row_idx.try_into().unwrap())?;
                 let mut anchor = self.anchors[row_idx].clone();
                 let ax = anchor.x.clone();
                 let ay = anchor.y.clone();

@@ -72,7 +72,7 @@ impl Interpreter {
                         Err(e) => warn!("{e:?}"),
                     };
                 }
-                Statement::Clear(idxs) => {
+                Statement::Clear(_idxs) => {
                     warn!("TODO: Clear handler not implemented!");
                 }
             }

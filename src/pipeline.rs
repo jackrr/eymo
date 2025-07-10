@@ -16,6 +16,7 @@ pub struct Pipeline {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Face {
     pub face: Polygon,
     pub mouth: Polygon,

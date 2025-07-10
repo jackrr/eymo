@@ -79,12 +79,6 @@ impl Into<image::math::Rect> for Rect {
     }
 }
 
-impl Into<imageproc::rect::Rect> for Rect {
-    fn into(self) -> imageproc::rect::Rect {
-        imageproc::rect::Rect::at(self.left() as i32, self.top() as i32).of_size(self.w, self.h)
-    }
-}
-
 impl From<Rect> for Polygon {
     fn from(r: Rect) -> Polygon {
         Polygon::new(Vec::from([

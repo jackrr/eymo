@@ -33,8 +33,8 @@ pub type Detection = Vec<Face>;
 impl Pipeline {
     pub fn new(max_threads: usize) -> Result<Pipeline> {
         Ok(Pipeline {
-            face_detector: FaceDetector::new(max_threads)?,
-            face_landmarker: FaceLandmarker::new(max_threads)?,
+            face_detector: FaceDetector::new(max_threads / 2)?,
+            face_landmarker: FaceLandmarker::new(max_threads / 2)?,
         })
     }
 

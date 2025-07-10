@@ -64,6 +64,9 @@ Operation: Operation = {
 		"drift(" <a:Float> r" *, *" <v:Float> ")" => Operation::Drift(<>),
 		"spin" => Operation::Spin(0.5),
 		"spin(" <v:Float> ")" => Operation::Spin(v),
+		"brightness(" <f:Float> ")" => Operation::Brightness(f),
+		"saturation(" <f:Float> ")" => Operation::Saturation(f),
+		"channels(" <r:Float> r" *, *" <g:Float> r" *, *" <b:Float> ")" => Operation::Chans(<>),
 };
 
 FlipVariant: FlipVariant = {

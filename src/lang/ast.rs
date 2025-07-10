@@ -49,4 +49,7 @@ pub enum Operation {
     Flip(FlipVariant),
     Drift(f32, f32),
     Spin(f32),
+    Brightness(f32),
+    Saturation(f32),
+    Chans(f32, f32, f32),
 }

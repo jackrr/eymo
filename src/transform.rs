@@ -32,6 +32,9 @@ pub struct Transform {
     last_tick: Option<Instant>,
     drift_vec: Option<(f32, f32)>,
     initial_drift_vec: Option<(f32, f32)>,
+    brightness_mod: f32,
+    saturation_mod: f32,
+    chans_mod: [f32; 4],
 }
 
 impl Default for Transform {
@@ -52,6 +55,9 @@ impl Default for Transform {
             last_tick: None,
             drift_vec: None,
             initial_drift_vec: None,
+            brightness_mod: -1.,
+            saturation_mod: -1.,
+            chans_mod: [-1., -1., -1., -1.],
         }
     }
 }
@@ -70,6 +76,18 @@ impl Transform {
 
     pub fn set_shape(&mut self, s: impl Into<Shape>) {
         self.shape = s.into();
+    }
+
+    pub fn set_brightness(&mut self, b: f32) {
+        self.brightness_mod = b;
+    }
+
+    pub fn set_saturation(&mut self, s: f32) {
+        self.saturation_mod = s;
+    }
+
+    pub fn set_chans(&mut self, r: f32, g: f32, b: f32) {
+        self.chans_mod = [r, g, b, 1.];
     }
 
     pub fn set_flip(&mut self, f: FlipVariant) {
@@ -203,6 +221,26 @@ impl Transform {
                             ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                             count: None,
                         },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 3,
+                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
                     ],
                 });
 
@@ -244,6 +282,29 @@ impl Transform {
                 cache: None,
             });
 
+        let adjustments = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("adjustments"),
+            size: 8,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        gpu.queue.write_buffer(
+            &adjustments,
+            0,
+            &bytemuck::cast_slice(&[self.brightness_mod, self.saturation_mod]),
+        );
+
+        let chans = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("chans"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        gpu.queue
+            .write_buffer(&chans, 0, &bytemuck::cast_slice(&self.chans_mod));
+
         let render_bg = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("render_bind_group2"),
             layout: &bind_group_layout,
@@ -257,6 +318,14 @@ impl Transform {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: adjustments.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: chans.as_entire_binding(),
                 },
             ],
         });

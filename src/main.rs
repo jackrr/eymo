@@ -31,7 +31,7 @@ struct Args {
     threads: Option<usize>,
 
     /// Max delay (ms) before timing out processing a thread
-    #[arg(short = 'l', long, default_value = "500")]
+    #[arg(short = 'l', long, default_value = "200")]
     max_frame_lag_ms: u32,
 
     /// Target frame rate
@@ -70,6 +70,8 @@ fn main() -> Result<()> {
 
     let mut interpreter = lang::parse(&std::fs::read_to_string(args.config)?)?;
 
+    let mut detection_cache = None;
+
     loop {
         let span = span!(Level::INFO, "frame_loop_iter");
         let _guard = span.enter();
@@ -92,6 +94,7 @@ fn main() -> Result<()> {
             &mut pipeline,
             args.max_frame_lag_ms,
             &mut interpreter,
+            &mut detection_cache,
         ) {
             Ok(img) => {
                 // ~1-2ms
@@ -119,6 +122,7 @@ fn process_frame(
     pipeline: &mut Pipeline,
     within_ms: u32,
     interpreter: &mut lang::Interpreter,
+    detection_cache: &mut Option<pipeline::Detection>,
 ) -> Result<RgbaImage> {
     let span = span!(Level::DEBUG, "process_frame");
     let _guard = span.enter();
@@ -128,13 +132,22 @@ fn process_frame(
     // TODO: Is there a faster camera format/decode solution
     let decode_nokwha_buff_span = span!(Level::DEBUG, "decode_nokwha_buff");
     let decode_nokwha_buff_guard = decode_nokwha_buff_span.enter();
+
     let input_img: RgbaImage = frame.decode_image::<RgbAFormat>()?;
 
     let texture =
         gpu.rgba_buffer_to_texture(input_img.as_raw(), input_img.width(), input_img.height());
     drop(decode_nokwha_buff_guard);
 
-    let detection = pipeline.run_gpu(&texture, gpu)?;
+    let mut store_detection = false;
+
+    let detection = match detection_cache.take() {
+        Some(d) => d,
+        None => {
+            store_detection = true;
+            pipeline.run_gpu(&texture, gpu)?
+        }
+    };
 
     match check_time(within_ms, start, "Face Detection") {
         Ok(_) => {}
@@ -148,6 +161,9 @@ fn process_frame(
         check_time(within_ms, start, waypoint)
     })?;
     let img = rgb::texture_to_rgba(gpu, &output);
+    if store_detection {
+        detection_cache.replace(detection);
+    }
 
     Ok(img)
 }

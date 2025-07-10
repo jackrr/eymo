@@ -1,6 +1,6 @@
 use anyhow::Result;
 use image::{EncodableLayout, RgbaImage};
-use tracing::debug;
+use tracing::{debug, error};
 
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -35,6 +35,15 @@ pub fn create_input_stream(fps: u32) -> Result<Camera> {
 
 pub struct OutputVideoStream {
     output_proc: std::process::Child,
+}
+
+impl Drop for OutputVideoStream {
+    fn drop(&mut self) {
+        match self.output_proc.kill() {
+            Err(e) => error!("Failed to stop output process {e:?}"),
+            Ok(_) => {}
+        }
+    }
 }
 
 impl OutputVideoStream {
@@ -83,7 +92,7 @@ impl OutputVideoStream {
         };
         let output_proc = command
             .stdin(Stdio::piped())
-            .stdout(Stdio::inherit())
+            .stdout(Stdio::null())
             .stderr(Stdio::inherit())
             .spawn()?;
 
@@ -93,15 +102,8 @@ impl OutputVideoStream {
     pub fn write_frame(&mut self, img: RgbaImage) -> Result<()> {
         if let Some(stdin) = self.output_proc.stdin.as_mut() {
             stdin.write_all(img.as_bytes())?;
-            stdin.flush()?;
         }
 
-        Ok(())
-    }
-
-    pub fn close(mut self) -> Result<()> {
-        drop(self.output_proc.stdin.take());
-        self.output_proc.wait()?;
         Ok(())
     }
 }

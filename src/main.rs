@@ -110,7 +110,6 @@ fn main() -> Result<()> {
         }
     }
 
-    output_stream.close()?;
     camera.stop_stream()?;
 
     Ok(())
@@ -160,6 +159,7 @@ fn process_frame(
     let output = interpreter.execute(&detection, texture, gpu, |waypoint| {
         check_time(within_ms, start, waypoint)
     })?;
+
     let img = rgb::texture_to_rgba(gpu, &output);
     if store_detection {
         detection_cache.replace(detection);

@@ -1,6 +1,6 @@
 #![warn(unused_extern_crates)]
 use anyhow::{Error, Result};
-use clap::Parser;
+use clap::{Args, Parser};
 use image::RgbaImage;
 use imggpu::gpu::GpuExecutor;
 use imggpu::rgb;
@@ -25,7 +25,7 @@ mod video;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
-struct Args {
+struct CmdArgs {
     /// Max threads to fanout work onto
     #[arg(short = 't', long)]
     threads: Option<usize>,
@@ -42,9 +42,24 @@ struct Args {
     #[arg(short, long, value_name = "FILE", default_value = "config.txt")]
     config: PathBuf,
 
-    /// Loopback device to write to. Displays in window if unset.
-    #[arg(short, long)]
+    #[command(flatten)]
+    out: Out,
+
+    /// Process single input frame, reading from input path
+    #[arg(short, long, requires = "output")]
+    input: Option<PathBuf>,
+}
+
+#[derive(Args, Debug)]
+#[group(multiple = false)]
+struct Out {
+    /// Loopback device to write to. Displays in window if unset
+    #[arg(group = "dest", short, long)]
     device: Option<String>,
+
+    /// Process single input frame, writing to output path
+    #[arg(group = "dest", short, long, requires = "input")]
+    output: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
@@ -55,7 +70,7 @@ fn main() -> Result<()> {
         .with_env_filter(filter)
         .init();
 
-    let args = Args::parse();
+    let args = CmdArgs::parse();
 
     let total_threads = get_cpu_count();
     let total_threads = args.threads.unwrap_or(total_threads).min(total_threads);
@@ -64,8 +79,9 @@ fn main() -> Result<()> {
     let mut camera = create_input_stream(args.fps)?;
 
     let resolution = camera.resolution();
+    // TODO: single frame mode
     let mut output_stream =
-        OutputVideoStream::new(resolution.width(), resolution.height(), args.device)?;
+        OutputVideoStream::new(resolution.width(), resolution.height(), args.out.device)?;
     let mut gpu = GpuExecutor::new()?;
 
     let mut interpreter = lang::parse(&std::fs::read_to_string(args.config)?)?;

@@ -1,5 +1,1 @@
-leye_region: translate(40, -100), scale(2), brighten(1.5), saturate(1.3)
-mouth: scale(3), drift(150, 45), spin(0.5), saturate(1.3)
-// mouth: scale(2), swap_with(leye), copy_to(reye)
-//mouth: scale(4), tile, saturate(1.5)
-//mouth#0: swap_with(mouth#1), scale(2)
+mouth: swap_with(leye_region#0), scale(2), saturate(1.2)

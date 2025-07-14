@@ -121,7 +121,7 @@ fn build_transforms(
                         format!("face-{idx}-{statement_idx}"),
                         face_shape(&fr.part, face),
                     );
-                    apply_operations(&mut t, statement, detection, Some(face));
+                    apply_operations(&mut t, statement, detection, Some(idx as usize));
                     Ok(Vec::from([t]))
                 }
                 None => Err(Error::msg(format!("No matching faces found for {fr:?}"))),
@@ -134,7 +134,7 @@ fn build_transforms(
                         format!("face-{idx}-{statement_idx}"),
                         face_shape(&fr.part, face),
                     );
-                    apply_operations(&mut t, statement, detection, Some(face));
+                    apply_operations(&mut t, statement, detection, Some(idx));
                     transforms.push(t);
                 }
                 Ok(transforms)
@@ -147,7 +147,7 @@ fn apply_operations(
     t: &mut Transform,
     statement: &ast::Transform,
     detection: &Detection,
-    face: Option<&Face>,
+    face_idx: Option<usize>,
 ) {
     for o in &statement.operations {
         match o {
@@ -158,7 +158,7 @@ fn apply_operations(
                 let others = others
                     .iter()
                     .map(|s| match s {
-                        ast::Shape::FaceRef(fr) => shapes(&fr, detection, face),
+                        ast::Shape::FaceRef(fr) => shapes(&fr, detection, face_idx),
                         ast::Shape::Rect(r) => Vec::from([r.clone().into()]),
                     })
                     .collect::<Vec<Vec<_>>>()
@@ -169,7 +169,7 @@ fn apply_operations(
                 let others = others
                     .iter()
                     .map(|s| match s {
-                        ast::Shape::FaceRef(fr) => shapes(&fr, detection, face),
+                        ast::Shape::FaceRef(fr) => shapes(&fr, detection, face_idx),
                         ast::Shape::Rect(r) => Vec::from([r.clone().into()]),
                     })
                     .collect::<Vec<Vec<_>>>()
@@ -178,7 +178,7 @@ fn apply_operations(
             }
             Operation::SwapWith(other) => match other {
                 ast::Shape::FaceRef(fr) => {
-                    let shapes = shapes(&fr, detection, face);
+                    let shapes = shapes(&fr, detection, face_idx);
                     if shapes.len() == 0 {
                         warn!("No swap target found in {statement:?}");
                     } else {
@@ -202,34 +202,31 @@ fn apply_operations(
     }
 }
 
-fn shapes(fr: &ast::FaceRef, d: &Detection, f: Option<&Face>) -> Vec<Shape> {
+fn shapes(fr: &ast::FaceRef, d: &Detection, target_idx: Option<usize>) -> Vec<Shape> {
     match fr.face_idx {
         Some(idx) => match d.get(idx as usize) {
-            Some(face) => match f {
-                Some(target_face) => {
-                    if ptr::eq(target_face, face) {
-                        Vec::from([face_shape(&fr.part, face)])
-                    } else {
-                        Vec::new()
-                    }
-                }
-                None => Vec::from([face_shape(&fr.part, face)]),
-            },
+            // dest has a face at FACE
+            Some(face) => Vec::from([face_shape(&fr.part, face)]),
             None => Vec::new(),
         },
-        None => d
-            .iter()
-            .filter_map(|face| match f {
-                Some(target_face) => {
-                    if ptr::eq(target_face, face) {
-                        Some(face_shape(&fr.part, face))
-                    } else {
-                        None
+        None => {
+            let target_face = match target_idx {
+                Some(idx) => d.get(idx),
+                None => None,
+            };
+            d.iter()
+                .filter_map(|face| match target_face {
+                    Some(target_face) => {
+                        if ptr::eq(target_face, face) {
+                            Some(face_shape(&fr.part, face))
+                        } else {
+                            None
+                        }
                     }
-                }
-                None => Some(face_shape(&fr.part, face)),
-            })
-            .collect::<Vec<_>>(),
+                    None => Some(face_shape(&fr.part, face)),
+                })
+                .collect::<Vec<_>>()
+        }
     }
 }
 

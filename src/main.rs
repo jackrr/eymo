@@ -5,7 +5,6 @@ use image::RgbaImage;
 use imggpu::gpu::GpuExecutor;
 use imggpu::rgb;
 use nokhwa::pixel_format::RgbAFormat;
-use nokhwa::Buffer;
 use num_cpus::get as get_cpu_count;
 use pipeline::Pipeline;
 use std::path::PathBuf;
@@ -31,8 +30,8 @@ struct CmdArgs {
     threads: Option<usize>,
 
     /// Max delay (ms) before timing out processing a thread
-    #[arg(short = 'l', long, default_value = "200")]
-    max_frame_lag_ms: u32,
+    #[arg(short = 'l', long)]
+    max_frame_lag_ms: Option<u32>,
 
     /// Target frame rate
     #[arg(long, default_value = "30")]
@@ -75,19 +74,27 @@ fn main() -> Result<()> {
     let total_threads = get_cpu_count();
     let total_threads = args.threads.unwrap_or(total_threads).min(total_threads);
     let mut pipeline = Pipeline::new(total_threads / 2)?;
-
-    let mut camera = create_input_stream(args.fps)?;
-
-    let resolution = camera.resolution();
-    // TODO: single frame mode
-    let mut output_stream =
-        OutputVideoStream::new(resolution.width(), resolution.height(), args.out.device)?;
     let mut gpu = GpuExecutor::new()?;
-
     let mut interpreter = lang::parse(&std::fs::read_to_string(args.config)?)?;
 
-    let mut detection_cache = None;
+    if args.out.output.is_some() {
+        // Process single image at file and exit
+        return process_image(
+            args.input.unwrap(),
+            args.out.output.unwrap(),
+            &mut gpu,
+            &mut pipeline,
+            &mut interpreter,
+            args.max_frame_lag_ms,
+        );
+    }
 
+    let mut camera = create_input_stream(args.fps)?;
+    let resolution = camera.resolution();
+    let mut output_stream =
+        OutputVideoStream::new(resolution.width(), resolution.height(), args.out.device)?;
+
+    let mut detection_cache = None;
     loop {
         let span = span!(Level::INFO, "frame_loop_iter");
         let _guard = span.enter();
@@ -104,13 +111,19 @@ fn main() -> Result<()> {
         };
         drop(get_frame_guard);
 
+        // TODO: Is there a faster camera format/decode solution
+        let decode_nokwha_buff_span = span!(Level::DEBUG, "decode_nokwha_buff");
+        let decode_nokwha_buff_guard = decode_nokwha_buff_span.enter();
+        let input_img: RgbaImage = frame.decode_image::<RgbAFormat>()?;
+        drop(decode_nokwha_buff_guard);
+
         match process_frame(
-            frame,
+            input_img,
             &mut gpu,
             &mut pipeline,
-            args.max_frame_lag_ms,
             &mut interpreter,
             &mut detection_cache,
+            args.max_frame_lag_ms,
         ) {
             Ok(img) => {
                 // ~1-2ms
@@ -131,31 +144,36 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn process_frame(
-    frame: Buffer,
+fn process_image(
+    src: PathBuf,
+    dest: PathBuf,
     gpu: &mut GpuExecutor,
     pipeline: &mut Pipeline,
-    within_ms: u32,
+    interpreter: &mut lang::Interpreter,
+    within_ms: Option<u32>,
+) -> Result<()> {
+    let img: RgbaImage = image::open(src)?.into();
+    let result = process_frame(img, gpu, pipeline, interpreter, &mut None, within_ms)?;
+    result.save(dest)?;
+    Ok(())
+}
+
+fn process_frame(
+    input_img: RgbaImage,
+    gpu: &mut GpuExecutor,
+    pipeline: &mut Pipeline,
     interpreter: &mut lang::Interpreter,
     detection_cache: &mut Option<pipeline::Detection>,
+    within_ms: Option<u32>,
 ) -> Result<RgbaImage> {
     let span = span!(Level::DEBUG, "process_frame");
     let _guard = span.enter();
     let start = Instant::now();
 
-    // WOAH: 15-40ms
-    // TODO: Is there a faster camera format/decode solution
-    let decode_nokwha_buff_span = span!(Level::DEBUG, "decode_nokwha_buff");
-    let decode_nokwha_buff_guard = decode_nokwha_buff_span.enter();
-
-    let input_img: RgbaImage = frame.decode_image::<RgbAFormat>()?;
-
     let texture =
         gpu.rgba_buffer_to_texture(input_img.as_raw(), input_img.width(), input_img.height());
-    drop(decode_nokwha_buff_guard);
 
     let mut store_detection = false;
-
     let detection = match detection_cache.take() {
         Some(d) => d,
         None => {
@@ -184,15 +202,20 @@ fn process_frame(
     Ok(img)
 }
 
-fn check_time(within_ms: u32, start: Instant, waypoint: &str) -> Result<()> {
+fn check_time(within_ms: Option<u32>, start: Instant, waypoint: &str) -> Result<()> {
     let elapsed_ms = start.elapsed().as_millis();
-    if elapsed_ms >= within_ms.into() {
-        return Err(Error::msg(format!(
-            "{elapsed_ms}ms exceeds allowed time of {within_ms}ms at {waypoint}",
-        )));
-    }
-
     debug!("{elapsed_ms}ms at {waypoint}");
+
+    match within_ms {
+        Some(within_ms) => {
+            if elapsed_ms >= within_ms.into() {
+                return Err(Error::msg(format!(
+                    "{elapsed_ms}ms exceeds allowed time of {within_ms}ms at {waypoint}",
+                )));
+            }
+        }
+        None => {}
+    }
 
     Ok(())
 }

@@ -45,6 +45,9 @@ impl Face {
     }
 }
 
+const MODEL: &[u8; 418490] =
+    include_bytes!("../../models/mediapipe_face_detection_short_range.onnx");
+
 impl FaceDetector {
     /*
     BlazeFace model wrapper using ort to run the model, then manually
@@ -67,7 +70,7 @@ impl FaceDetector {
      */
     pub fn new(threads: usize) -> Result<FaceDetector> {
         Ok(FaceDetector {
-            model: initialize_model("mediapipe_face_detection_short_range.onnx", threads)?,
+            model: initialize_model(MODEL, threads)?,
             anchors: gen_anchors(),
         })
     }

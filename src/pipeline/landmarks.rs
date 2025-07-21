@@ -46,10 +46,12 @@ const NOSE_IDXS: [usize; 23] = [
     419, 351, 417,
 ];
 
+const MODEL: &[u8; 2429047] = include_bytes!("../../models/mediapipe_face_landmark.onnx");
+
 impl FaceLandmarker {
     pub fn new(threads: usize) -> Result<FaceLandmarker> {
         Ok(FaceLandmarker {
-            model: initialize_model("mediapipe_face_landmark.onnx", threads)?,
+            model: initialize_model(MODEL, threads)?,
         })
     }
 

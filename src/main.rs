@@ -38,7 +38,12 @@ struct CmdArgs {
     fps: u32,
 
     /// Config file to read from
-    #[arg(short, long, value_name = "FILE", default_value = "config.txt")]
+    #[arg(
+        short,
+        long,
+        value_name = "FILE",
+        default_value = "examples/rotate-face.eymo"
+    )]
     config: PathBuf,
 
     #[command(flatten)]

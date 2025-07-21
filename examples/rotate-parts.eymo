@@ -1,0 +1,3 @@
+mouth: copy_to(mouth+1), scale(2.0), saturate(1.3), brighten(1.2)
+leye_region+1: copy_to(leye_region), scale(1.3), saturate(1.3), brighten(1.2)
+reye_region+2: copy_to(reye_region), scale(1.3), saturate(1.3), brighten(1.2)

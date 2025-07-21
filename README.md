@@ -51,6 +51,17 @@ detection index:
 mouth#0: swap_with(mouth#1)
 ```
 
+Additionally transforms can target faces by relative order in the
+detection list:
+
+```
+// Copy each mouth to "next" mouth
+mouth: copy_to(mouth+1)
+
+// Copy each left eye to "previous" left eye
+leye+1: copy_to(leye)
+```
+
 The set of available shapes are:
 
 - `leye` - left eye
@@ -75,8 +86,7 @@ The available operations are:
 tile // tile image with specified shape
 scale(2.5) // grow/shrink shape by given multiplication factor
 rotate(-45) // rotate shape by given degrees
-copy_to(nose, mouth, ...) // copy shape to one or more destination shapes, appying transforms to shape and destinations
-write_to(nose, mouth, ...) // copy shape to one or more destination shapes, applying transforms only to destinations
+copy_to(nose, mouth, ...) // copy shape to one or more destination shapes
 swap_with(nose) // swap shape contents with target shape contents
 translate(50, -100) // move shape 50 to the right and up 100 (Y minimum is 0 at top of frame)
 flip(vertical) // flip pixels vertically in shape. accepts vertcial | horizontal | both

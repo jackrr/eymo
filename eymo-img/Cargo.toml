@@ -1,0 +1,20 @@
+[package]
+name = "eymo-img"
+version = "0.1.0"
+edition = "2024"
+features = [ "test" ]
+
+[dependencies]
+anyhow = "1.0.98"
+bytemuck = "1.23.1"
+image = "0.25.6"
+lalrpop-util = { version = "0.21.0", features = ["lexer", "unicode"] }
+ort = { version = "=2.0.0-rc.9", features = ["xnnpack"] }
+ort-sys = { version = "=2.0.0-rc.9" }
+pollster = "0.4.0"
+robust = "1.2.0"
+tracing = "0.1.41"
+wgpu = "25.0.2"
+
+[build-dependencies]
+lalrpop = "0.22.2"

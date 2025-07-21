@@ -1,4 +1,4 @@
-use crate::lang::ast::{Statement, Transform, Shape, FaceRef, FacePart, Operation, FlipVariant};
+use crate::lang::ast::{Statement, Transform, Shape, FaceRef, FaceIdx, FacePart, Operation, FlipVariant};
 use crate::shapes::rect::Rect;
 use std::str::FromStr;
 
@@ -19,14 +19,7 @@ pub Statements = WhitespaceDelim<Statement>;
 
 pub Statement: Statement = {
 		<t:Transform> => Statement::Transform(<>),
-		<c:Clear> => Statement::Clear(<>),
 };
-
-Clear: Option<Vec<u32>> = {
-    "clear" => None,
-		"clear(" <idx:CommaDelim<Num>> ")" => Some(<>),
-};
-
 
 Transform: Transform = {
     <shape:Shape> r": *" <operations:Operations> => Transform {<>}
@@ -34,7 +27,9 @@ Transform: Transform = {
 
 Shape: Shape = {
 		"rect(" <x:Num> <y:Num> <w:Num> <h:Num> ")" => Shape::Rect(Rect::from_tl(x, y, w, h)),
-		<part:FacePart> "#" <face_idx:Num> => Shape::FaceRef(FaceRef {part, face_idx: Some(face_idx)}),
+		<part:FacePart> "#" <face_idx:Num> => Shape::FaceRef(FaceRef {part, face_idx: Some(FaceIdx::Absolute(face_idx))}),
+		<part:FacePart> "+" <face_rel:Num> => Shape::FaceRef(FaceRef {part, face_idx: Some(FaceIdx::Relative(face_rel as i32))}),
+		<part:FacePart> "-" <face_rel:Num> => Shape::FaceRef(FaceRef {part, face_idx: Some(FaceIdx::Relative(-1 * face_rel as i32))}),
     <part:FacePart> => Shape::FaceRef(FaceRef { part, face_idx: None }),
 };
 
@@ -55,7 +50,6 @@ Operation: Operation = {
 		"scale(" <f:Float> ")" => Operation::Scale(f),
 		"rotate(" <f:Float> ")" => Operation::Rotate(f),
 		"copy_to(" <s:CommaDelim<Shape>> ")" => Operation::CopyTo(s),
-		"write_to(" <s:CommaDelim<Shape>> ")" => Operation::WriteTo(s),
 		"swap_with(" <s:Shape> ")" => Operation::SwapWith(s),
 		"translate(" <x:Int> r" *, *" <y:Int> ")" => Operation::Translate(<>),
 		"flip(" <fv:FlipVariant> ")" => Operation::Flip(fv),

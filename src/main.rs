@@ -75,7 +75,7 @@ fn main() -> Result<()> {
     let total_threads = args.threads.unwrap_or(total_threads).min(total_threads);
     let mut pipeline = Pipeline::new(total_threads / 2)?;
     let mut gpu = GpuExecutor::new()?;
-    let mut interpreter = lang::parse(&std::fs::read_to_string(args.config)?)?;
+    let mut interpreter = lang::parse(&std::fs::read_to_string(args.config)?, &mut gpu)?;
 
     if args.out.output.is_some() {
         // Process single image at file and exit
@@ -192,7 +192,7 @@ fn process_frame(
 
     let output = interpreter.execute(&detection, texture, gpu, |waypoint| {
         check_time(within_ms, start, waypoint)
-    })?;
+    });
 
     let img = rgb::texture_to_rgba(gpu, &output);
     if store_detection {

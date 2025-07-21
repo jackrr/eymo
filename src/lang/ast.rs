@@ -1,11 +1,10 @@
 use crate::shapes::rect::Rect;
 pub use crate::transform::FlipVariant;
+use std::fmt;
 
-// TODO: Add clear statement
 #[derive(Debug)]
 pub enum Statement {
     Transform(Transform),
-    Clear(Option<Vec<u32>>),
 }
 
 #[derive(Debug)]
@@ -23,7 +22,31 @@ pub enum Shape {
 #[derive(Debug)]
 pub struct FaceRef {
     pub part: FacePart,
-    pub face_idx: Option<u32>,
+    pub face_idx: Option<FaceIdx>,
+}
+
+impl fmt::Display for FaceRef {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &self.face_idx {
+            Some(fi) => write!(f, "{}{}", self.part, fi),
+            None => write!(f, "{}", self.part),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum FaceIdx {
+    Absolute(u32),
+    Relative(i32),
+}
+
+impl fmt::Display for FaceIdx {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Absolute(i) => write!(f, "abs{i}"),
+            Self::Relative(i) => write!(f, "rel{i}"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -37,12 +60,17 @@ pub enum FacePart {
     Nose,
 }
 
+impl fmt::Display for FacePart {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 #[derive(Debug)]
 pub enum Operation {
     Tile,
     Scale(f32),
     Rotate(f32),
-    WriteTo(Vec<Shape>),
     CopyTo(Vec<Shape>),
     SwapWith(Shape),
     Translate(i32, i32),

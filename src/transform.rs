@@ -1,11 +1,10 @@
-use std::time::Instant;
-
 use crate::imggpu::vertex::Vertex;
 use crate::shapes::point::Point;
 use crate::shapes::shape::Shape;
 use crate::{imggpu::gpu::GpuExecutor, shapes::rect::Rect};
-use anyhow::Result;
-use tracing::{span, trace, warn, Level};
+use std::collections::HashMap;
+use std::time::Instant;
+use tracing::{span, warn, Level};
 use wgpu::util::DeviceExt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,49 +14,69 @@ pub enum FlipVariant {
     Both,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Transform {
-    pub id: String,
-    shape: Shape,
-    copy_dests: Vec<Shape>,
-    swap: Option<Shape>,
-    initial_rotate_deg: Option<f32>,
     rotate_deg: Option<f32>,
     flip: Option<FlipVariant>,
-    initial_translation: Option<(i32, i32)>,
     translation: Option<(i32, i32)>,
     scale: f32,
     tile: bool,
     rps: Option<f32>,
     last_tick: Option<Instant>,
     drift_vec: Option<(f32, f32)>,
-    initial_drift_vec: Option<(f32, f32)>,
     brightness_mod: f32,
     saturation_mod: f32,
     chans_mod: [f32; 4],
+    cache: HashMap<String, ShapeOpState>,
+    gpu_gunk: GpuGunk,
 }
 
-impl Default for Transform {
-    fn default() -> Self {
+#[derive(Debug)]
+pub struct ShapeOp {
+    id: String,
+    base: Shape,
+    swap: Option<Shape>,
+    dest: Option<Shape>,
+}
+
+#[derive(Debug)]
+struct GpuGunk {
+    bg_layout: wgpu::BindGroupLayout,
+    render_pipeline: wgpu::RenderPipeline,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ShapeOpState {
+    translation: Option<(i32, i32)>,
+    drift_vec: Option<(f32, f32)>,
+    rotate_deg: Option<f32>,
+}
+
+impl ShapeOp {
+    pub fn swap(id: String, a: impl Into<Shape>, b: impl Into<Shape>) -> Self {
         Self {
-            id: "".to_string(),
-            shape: Default::default(),
-            copy_dests: Vec::new(),
+            id,
+            base: a.into(),
+            swap: Some(b.into()),
+            dest: None,
+        }
+    }
+
+    pub fn copy(id: String, src: impl Into<Shape>, dest: impl Into<Shape>) -> Self {
+        Self {
+            id,
+            base: src.into(),
+            dest: Some(dest.into()),
             swap: None,
-            initial_rotate_deg: None,
-            rotate_deg: None,
-            flip: None,
-            initial_translation: None,
-            translation: None,
-            scale: 1.,
-            tile: false,
-            rps: None,
-            last_tick: None,
-            drift_vec: None,
-            initial_drift_vec: None,
-            brightness_mod: -1.,
-            saturation_mod: -1.,
-            chans_mod: [-1., -1., -1., -1.],
+        }
+    }
+
+    pub fn on_shape(id: String, s: impl Into<Shape>) -> Self {
+        Self {
+            id,
+            base: s.into(),
+            dest: None,
+            swap: None,
         }
     }
 }
@@ -66,16 +85,22 @@ const TILE_HEIGHT: u32 = 100;
 const TILE_WIDTH: u32 = 160;
 
 impl Transform {
-    pub fn new(s: impl Into<Shape>, id: String) -> Self {
+    pub fn new(gpu: &mut GpuExecutor) -> Self {
         Self {
-            id,
-            shape: s.into(),
-            ..Default::default()
+            flip: None,
+            scale: 1.,
+            tile: false,
+            brightness_mod: -1.,
+            saturation_mod: -1.,
+            chans_mod: [-1., -1., -1., -1.],
+            last_tick: None,
+            rotate_deg: None,
+            rps: None,
+            translation: None,
+            drift_vec: None,
+            cache: HashMap::new(),
+            gpu_gunk: GpuGunk::init(gpu),
         }
-    }
-
-    pub fn set_shape(&mut self, s: impl Into<Shape>) {
-        self.shape = s.into();
     }
 
     pub fn set_brightness(&mut self, b: f32) {
@@ -94,21 +119,6 @@ impl Transform {
         self.flip = Some(f);
     }
 
-    pub fn copy_to(&mut self, dests: impl Into<Vec<Shape>>) {
-        // Apply transforms to self shape and dests
-        self.copy_dests = dests.into();
-        self.copy_dests.push(self.shape.clone());
-    }
-
-    pub fn write_to(&mut self, dests: impl Into<Vec<Shape>>) {
-        // Apply transforms ONLY to dests
-        self.copy_dests = dests.into();
-    }
-
-    pub fn swap_with(&mut self, s: Shape) {
-        self.swap = Some(s);
-    }
-
     pub fn set_scale(&mut self, s: f32) {
         self.scale = s;
 
@@ -119,41 +129,10 @@ impl Transform {
 
     pub fn set_tiling(&mut self, t: bool) {
         self.tile = t;
-
-        if self.tile {
-            if self.scale != 1. {
-                warn!("Scale with tile not currently supported. Skipping scale operation.");
-            }
-
-            if self.rotate_deg.is_some() {
-                warn!("Rotate with tile not currently supported. Skipping rotate operation.");
-            }
-
-            if self.translation.is_some() {
-                warn!(
-                    "Translation with tile not currently supported. Skipping translate operation."
-                );
-            }
-
-            if self.translation.is_some() {
-                warn!(
-                    "Translation with tile not currently supported. Skipping translate operation."
-                );
-            }
-        }
     }
 
     pub fn set_rot_degrees(&mut self, deg: f32) {
-        if self.initial_rotate_deg.is_some() && self.initial_rotate_deg.unwrap() == deg {
-            trace!("Rotate already set.");
-        } else {
-            self.initial_rotate_deg = Some(deg);
-            self.rotate_deg = Some(deg);
-        }
-
-        if self.tile {
-            warn!("Rotate with tile not currently supported. Skipping rotate operation.");
-        }
+        self.rotate_deg = Some(deg);
     }
 
     // rps: rotations per second. 0. = stationary, 0.5 = 180deg/s, -0.5 = -180deg/s
@@ -163,269 +142,78 @@ impl Transform {
     }
 
     pub fn translate_by(&mut self, x: i32, y: i32) {
-        let trans = (x, y);
-        if self.initial_translation.is_some() && self.initial_translation.unwrap() == trans {
-            trace!("Translation already set.");
-        } else {
-            self.initial_translation = Some(trans);
-            self.translation = Some(trans);
-        }
-
-        if self.tile {
-            warn!("Translation with tile not currently supported. Skipping translate operation.");
-        }
+        self.translation = Some((x, y));
     }
 
     // velocity: pixels/s of travel
     // angle: clockwise degrees of initial vector
     pub fn set_drift(&mut self, velocity: f32, angle: f32) {
-        let drift_vec = (velocity, angle);
-
-        if self.initial_drift_vec.is_some() && self.initial_drift_vec.unwrap() == drift_vec {
-            trace!("Drift already set.");
-        } else {
-            self.initial_drift_vec = Some(drift_vec);
-            self.drift_vec = Some(drift_vec);
-        }
-
+        self.drift_vec = Some((velocity, angle));
         self.translate_by(0, 0); // initalize translation
     }
 
-    pub fn execute(&mut self, gpu: &mut GpuExecutor, tex: &wgpu::Texture) -> Result<wgpu::Texture> {
+    pub fn execute(
+        &mut self,
+        gpu: &mut GpuExecutor,
+        tex: &wgpu::Texture,
+        shape_ops: Vec<ShapeOp>,
+    ) -> wgpu::Texture {
         let span = span!(Level::DEBUG, "Transform#execute");
         let _guard = span.enter();
 
+        let mut vertices = Vec::new();
+        for op in shape_ops.into_iter() {
+            let prev_val = self.cache.remove(&op.id);
+            let next_cache_val = self.tick(&op.base, tex, prev_val);
+            vertices.push(self.gen_vertices(tex, &op, &next_cache_val));
+            self.cache.insert(op.id.clone(), next_cache_val);
+        }
+
+        self.last_tick = Some(Instant::now());
+
         let sampler = self.sampler(gpu);
-
-        let shader_code = wgpu::include_wgsl!("transform.wgsl");
-        let shader = gpu.load_shader("transform", shader_code);
-
-        let bind_group_layout =
-            gpu.device
-                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("render bind group layout"),
-                    entries: &[
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                            ty: wgpu::BindingType::Texture {
-                                sample_type: Default::default(),
-                                view_dimension: Default::default(),
-                                multisampled: false,
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 2,
-                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 3,
-                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                    ],
-                });
-
-        let pipeline_layout = gpu
-            .device
-            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: None,
-                bind_group_layouts: &[&bind_group_layout],
-                push_constant_ranges: &[],
-            });
-
-        let render_pipeline = gpu
-            .device
-            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("render_pipeline"),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vert_main"),
-                    compilation_options: Default::default(),
-                    buffers: &[Vertex::desc()],
-                },
-                primitive: wgpu::PrimitiveState {
-                    ..Default::default()
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some("frag_main"),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Rgba8Unorm,
-                        blend: Some(wgpu::BlendState::REPLACE),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                depth_stencil: None,
-                multisample: Default::default(),
-                multiview: None,
-                cache: None,
-            });
-
-        let adjustments = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("adjustments"),
-            size: 8,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        gpu.queue.write_buffer(
-            &adjustments,
-            0,
-            &bytemuck::cast_slice(&[self.brightness_mod, self.saturation_mod]),
-        );
-
-        let chans = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("chans"),
-            size: 16,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        gpu.queue
-            .write_buffer(&chans, 0, &bytemuck::cast_slice(&self.chans_mod));
-
-        let render_bg = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("render_bind_group2"),
-            layout: &bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(
-                        &tex.create_view(&Default::default()),
-                    ),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: adjustments.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: chans.as_entire_binding(),
-                },
-            ],
-        });
-
-        let output_tex = gpu.device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
-            size: wgpu::Extent3d {
-                width: tex.width(),
-                height: tex.height(),
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            view_formats: &[wgpu::TextureFormat::Rgba8Unorm],
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::COPY_SRC
-                | wgpu::TextureUsages::COPY_DST
-                | wgpu::TextureUsages::TEXTURE_BINDING,
-        });
-
-        let mut encoder = gpu
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("encoder"),
-            });
-
-        self.tick(tex);
-        let vertices = self.vertices(tex);
-
-        let vertex_buffer = gpu
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("vertex_buffer"),
-                contents: bytemuck::cast_slice(&vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-
-        encoder.copy_texture_to_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &tex,
-                mip_level: Default::default(),
-                origin: Default::default(),
-                aspect: Default::default(),
-            },
-            wgpu::TexelCopyTextureInfo {
-                texture: &output_tex,
-                mip_level: Default::default(),
-                origin: Default::default(),
-                aspect: Default::default(),
-            },
-            wgpu::Extent3d {
-                width: tex.width(),
-                height: tex.height(),
-                depth_or_array_layers: 1,
-            },
-        );
-
-        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("render_pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &output_tex.create_view(&Default::default()),
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load, // preserve underlying image
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            ..Default::default()
-        });
-
-        render_pass.set_pipeline(&render_pipeline);
-        render_pass.set_bind_group(0, &render_bg, &[]);
-        render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-        render_pass.draw(0..vertices.len() as u32, 0..1);
-        drop(render_pass);
-
-        gpu.queue.submit(std::iter::once(encoder.finish()));
-        Ok(output_tex)
+        self.gpu_gunk.execute(
+            gpu,
+            vertices.concat(),
+            tex,
+            &[self.brightness_mod, self.saturation_mod],
+            &self.chans_mod,
+            sampler,
+        )
     }
 
-    fn tick(&mut self, tex: &wgpu::Texture) {
+    fn tick(&self, shape: &Shape, tex: &wgpu::Texture, prev: Option<ShapeOpState>) -> ShapeOpState {
         // animate spin and drift since last iteration
+        let mut next_state = ShapeOpState::default();
+
         match self.last_tick {
             Some(last) => {
+                let defaults = (
+                    self.rotate_deg.unwrap_or(0.),
+                    self.drift_vec.unwrap_or((0., 0.)),
+                    self.translation.unwrap_or((0, 0)),
+                );
+                let (rotate_deg, (vel, ang), (tx, ty)) = match prev {
+                    Some(prev) => (
+                        prev.rotate_deg.unwrap_or(defaults.0),
+                        prev.drift_vec.unwrap_or(defaults.1),
+                        prev.translation.unwrap_or(defaults.2),
+                    ),
+                    None => defaults,
+                };
+
                 if self.rps.is_some() {
                     let rps = self.rps.unwrap();
-                    let old_rot = self.rotate_deg.unwrap();
-                    self.rotate_deg = Some(old_rot + 360. * rps * last.elapsed().as_secs_f32());
+                    next_state.rotate_deg =
+                        Some(rotate_deg + 360. * rps * last.elapsed().as_secs_f32());
                 }
 
                 if self.drift_vec.is_some() {
-                    let (vel, ang) = self.drift_vec.unwrap();
                     let hyp = vel * last.elapsed().as_secs_f32();
                     let dy = (ang.to_radians().cos() * hyp).round() as i32;
                     let dx = (ang.to_radians().sin() * hyp).round() as i32;
-                    let (tx, ty) = self.translation.unwrap();
 
-                    let center = self.shape.center();
+                    let center = shape.center();
                     let center_x = center.x as i32;
                     let center_y = center.y as i32;
 
@@ -456,41 +244,52 @@ impl Transform {
                         next_ang = mirror_y(next_ang);
                     }
 
-                    self.drift_vec = Some((vel, next_ang));
-                    self.translation = Some((next_x - center_x, next_y - center_y));
+                    next_state.drift_vec = Some((vel, next_ang));
+                    next_state.translation = Some((next_x - center_x, next_y - center_y));
                 }
             }
             None => (),
         }
 
-        self.last_tick = Some(Instant::now());
+        next_state
     }
 
-    pub fn vertices(&self, tex: &wgpu::Texture) -> Vec<Vertex> {
+    fn gen_vertices(&self, tex: &wgpu::Texture, op: &ShapeOp, s: &ShapeOpState) -> Vec<Vertex> {
         if self.tile {
-            return self.tiled_vertices(tex);
+            return self.tiled_vertices(&op.base, tex, s);
         }
 
         let mut vertex_groups = Vec::new();
 
-        for ds in &self.copy_dests {
-            vertex_groups.push(self.vertices_for_shapes(tex, &self.shape, ds));
+        if op.swap.is_some() {
+            let dest = op.swap.as_ref().unwrap();
+            vertex_groups.push(self.vertices_for_shapes(tex, &op.base, &dest, s));
+            vertex_groups.push(self.vertices_for_shapes(tex, &dest, &op.base, s));
         }
 
-        if self.swap.is_some() {
-            let swap = self.swap.as_ref().unwrap().clone();
-            vertex_groups.push(self.vertices_for_shapes(tex, &self.shape, &swap));
-            vertex_groups.push(self.vertices_for_shapes(tex, &swap, &self.shape));
+        if op.dest.is_some() {
+            vertex_groups.push(self.vertices_for_shapes(
+                tex,
+                &op.base,
+                op.dest.as_ref().unwrap(),
+                s,
+            ));
         }
 
-        if vertex_groups.len() == 0 {
-            vertex_groups.push(self.vertices_for_shapes(tex, &self.shape, &self.shape));
+        if op.swap.is_none() && op.dest.is_none() {
+            vertex_groups.push(self.vertices_for_shapes(tex, &op.base, &op.base, s));
         }
 
         vertex_groups.concat()
     }
 
-    fn vertices_for_shapes(&self, tex: &wgpu::Texture, src: &Shape, dest: &Shape) -> Vec<Vertex> {
+    fn vertices_for_shapes(
+        &self,
+        tex: &wgpu::Texture,
+        src: &Shape,
+        dest: &Shape,
+        s: &ShapeOpState,
+    ) -> Vec<Vertex> {
         let width = tex.width() as f32;
         let height = tex.height() as f32;
         let make_vtx = |(src, dest): (Point, Point)| -> Vertex {
@@ -511,15 +310,15 @@ impl Transform {
             .iter_projection_onto(dest.clone())
             .map(make_vtx)
             .collect::<Vec<_>>();
-        vertices = self.scale_rotate_flip(&mut vertices, tex.width(), tex.height());
+        vertices = self.scale_rotate_flip(&mut vertices, tex.width(), tex.height(), s);
 
         Vertex::to_triangles(vertices)
     }
 
-    fn tiled_vertices(&self, tex: &wgpu::Texture) -> Vec<Vertex> {
+    fn tiled_vertices(&self, shape: &Shape, tex: &wgpu::Texture, s: &ShapeOpState) -> Vec<Vertex> {
         let width = tex.width();
         let height = tex.height();
-        let tex_rect = Rect::from(self.shape.clone());
+        let tex_rect = Rect::from(shape.clone());
         let tr = tex_rect.right() as f32 / width as f32;
         let tl = tex_rect.left() as f32 / width as f32;
         let tt = tex_rect.top() as f32 / height as f32;
@@ -544,7 +343,7 @@ impl Transform {
                     Vertex::new_with_tex(&[r, b], &tex_br),
                 ]);
 
-                vertices = self.scale_rotate_flip(&mut vertices, width, height);
+                vertices = self.scale_rotate_flip(&mut vertices, width, height, s);
                 rects.push(Vertex::to_triangles(vertices));
             }
         }
@@ -557,6 +356,7 @@ impl Transform {
         vertices: &mut Vec<Vertex>,
         width: u32,
         height: u32,
+        s: &ShapeOpState,
     ) -> Vec<Vertex> {
         // Clip space
         let mut l = f32::MAX;
@@ -610,7 +410,7 @@ impl Transform {
         // x: -100 -> -0.1
         // y: 100 -> -0.1
         // y: -100 -> 0.1
-        let trans = Vertex::new(&match self.translation {
+        let trans = Vertex::new(&match s.translation {
             None => [0., 0.],
             Some(t) => [
                 2. * t.0 as f32 / width as f32,
@@ -638,7 +438,7 @@ impl Transform {
 
                 // TODO: scale, rotate, translate support for tiling
                 if !self.tile {
-                    if self.translation.is_some() {
+                    if s.translation.is_some() {
                         v.add(&trans);
                     }
 
@@ -648,8 +448,8 @@ impl Transform {
                         v.add(&clip_center);
                     }
 
-                    if self.rotate_deg.is_some() {
-                        let rad = self.rotate_deg.unwrap().to_radians();
+                    if s.rotate_deg.is_some() {
+                        let rad = s.rotate_deg.unwrap().to_radians();
                         let cos = rad.cos();
                         let sin = rad.sin();
 
@@ -681,6 +481,229 @@ impl Transform {
             mipmap_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         })
+    }
+}
+
+impl GpuGunk {
+    fn execute(
+        &mut self,
+        gpu: &mut GpuExecutor,
+        vertices: Vec<Vertex>,
+        tex: &wgpu::Texture,
+        adjs: &[f32; 2],
+        chans: &[f32; 4],
+        sampler: wgpu::Sampler,
+    ) -> wgpu::Texture {
+        let adjustments = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("adjustments"),
+            size: 8,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        gpu.queue
+            .write_buffer(&adjustments, 0, &bytemuck::cast_slice(adjs));
+
+        let chans_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("chans"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        gpu.queue
+            .write_buffer(&chans_buf, 0, &bytemuck::cast_slice(chans));
+
+        let render_bg = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("render_bind_group2"),
+            layout: &self.bg_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(
+                        &tex.create_view(&Default::default()),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: adjustments.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: chans_buf.as_entire_binding(),
+                },
+            ],
+        });
+
+        let output_tex = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: tex.width(),
+                height: tex.height(),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            view_formats: &[wgpu::TextureFormat::Rgba8Unorm],
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::TEXTURE_BINDING,
+        });
+
+        let vertex_buffer = gpu
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("vertex_buffer"),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+
+        let mut encoder = gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("encoder"),
+            });
+
+        encoder.copy_texture_to_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &tex,
+                mip_level: Default::default(),
+                origin: Default::default(),
+                aspect: Default::default(),
+            },
+            wgpu::TexelCopyTextureInfo {
+                texture: &output_tex,
+                mip_level: Default::default(),
+                origin: Default::default(),
+                aspect: Default::default(),
+            },
+            wgpu::Extent3d {
+                width: tex.width(),
+                height: tex.height(),
+                depth_or_array_layers: 1,
+            },
+        );
+
+        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("render_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &output_tex.create_view(&Default::default()),
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load, // preserve underlying image
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+
+        render_pass.set_pipeline(&self.render_pipeline);
+        render_pass.set_bind_group(0, &render_bg, &[]);
+        render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        render_pass.draw(0..vertices.len() as u32, 0..1);
+        drop(render_pass);
+
+        gpu.queue.submit(std::iter::once(encoder.finish()));
+        output_tex
+    }
+
+    fn init(gpu: &mut GpuExecutor) -> Self {
+        let shader_code = wgpu::include_wgsl!("transform.wgsl");
+        let shader = gpu.load_shader("transform", shader_code);
+
+        let bg_layout = gpu
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("render bind group layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: Default::default(),
+                            view_dimension: Default::default(),
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let pipeline_layout = gpu
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: None,
+                bind_group_layouts: &[&bg_layout],
+                push_constant_ranges: &[],
+            });
+
+        let render_pipeline = gpu
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("render_pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vert_main"),
+                    compilation_options: Default::default(),
+                    buffers: &[Vertex::desc()],
+                },
+                primitive: wgpu::PrimitiveState {
+                    ..Default::default()
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("frag_main"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                depth_stencil: None,
+                multisample: Default::default(),
+                multiview: None,
+                cache: None,
+            });
+
+        Self {
+            bg_layout,
+            render_pipeline,
+        }
     }
 }
 

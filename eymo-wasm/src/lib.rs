@@ -18,7 +18,7 @@ impl ImgProcessor {
     pub fn new(command: &str) -> Result<ImgProcessor, JsValue> {
         let mut gpu = anyhow_result_to_js_result(GpuExecutor::new())?;
         let interpreter = anyhow_result_to_js_result(lang::parse(command, &mut gpu))?;
-        let pipeline = anyhow_result_to_js_result(Pipeline::new(1))?;
+        let pipeline = anyhow_result_to_js_result(Pipeline::new())?;
 
         Ok(Self {
             interpreter,

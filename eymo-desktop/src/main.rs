@@ -7,7 +7,6 @@ use eymo_img::lang;
 use eymo_img::pipeline::{Detection, Pipeline};
 use image::RgbaImage;
 use nokhwa::pixel_format::RgbAFormat;
-use num_cpus::get as get_cpu_count;
 use std::path::PathBuf;
 use std::time::Instant;
 use tracing::{debug, error, span, trace, warn, Level};
@@ -21,10 +20,6 @@ mod video;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct CmdArgs {
-    /// Max threads to fanout work onto
-    #[arg(short = 't', long)]
-    threads: Option<usize>,
-
     /// Max delay (ms) before timing out processing a thread
     #[arg(short = 'l', long)]
     max_frame_lag_ms: Option<u32>,
@@ -72,9 +67,7 @@ fn main() -> Result<()> {
 
     let args = CmdArgs::parse();
 
-    let total_threads = get_cpu_count();
-    let total_threads = args.threads.unwrap_or(total_threads).min(total_threads);
-    let mut pipeline = Pipeline::new(total_threads / 2)?;
+    let mut pipeline = Pipeline::new()?;
     let mut gpu = GpuExecutor::new()?;
     let mut interpreter = lang::parse(&std::fs::read_to_string(args.config)?, &mut gpu)?;
 

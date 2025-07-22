@@ -45,8 +45,7 @@ impl Face {
     }
 }
 
-// const MODEL: &[u8; 418490] =
-//     include_bytes!("../../models/mediapipe_face_detection_short_range.onnx");
+const MODEL: &[u8; 418490] = include_bytes!("./mediapipe_face_detection_short_range.onnx");
 
 impl FaceDetector {
     /*
@@ -68,9 +67,9 @@ impl FaceDetector {
     // scale gets interpolated
 
      */
-    pub fn new(threads: usize) -> Result<FaceDetector> {
+    pub fn new() -> Result<FaceDetector> {
         Ok(FaceDetector {
-            model: initialize_model("mediapipe_face_detection_short_range.onnx", threads)?,
+            model: initialize_model(MODEL)?,
             anchors: gen_anchors(),
         })
     }

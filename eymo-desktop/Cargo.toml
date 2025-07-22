@@ -11,6 +11,5 @@ bytemuck = "1.23.1"
 clap = { version = "4.5.38", features = ["derive"] }
 image = "0.25.6"
 nokhwa = { version = "0.10.7", features = ["input-native", "input-jscam"] }
-num_cpus = "1.16.0"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }

@@ -31,10 +31,10 @@ pub struct Face {
 pub type Detection = Vec<Face>;
 
 impl Pipeline {
-    pub fn new(max_threads: usize) -> Result<Pipeline> {
+    pub fn new() -> Result<Pipeline> {
         Ok(Pipeline {
-            face_detector: FaceDetector::new(max_threads / 2)?,
-            face_landmarker: FaceLandmarker::new(max_threads / 2)?,
+            face_detector: FaceDetector::new()?,
+            face_landmarker: FaceLandmarker::new()?,
         })
     }
 

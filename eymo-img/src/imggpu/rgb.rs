@@ -2,8 +2,8 @@ use super::gpu::GpuExecutor;
 use super::util::{int_div_round_up, padded_bytes_per_row};
 use anyhow::Result;
 use image::RgbaImage;
-use ort::value::Tensor;
 use tracing::{debug, span, Level};
+use tract_onnx::prelude::Tensor;
 
 pub enum OutputRange {
     ZeroToOne,
@@ -68,7 +68,15 @@ pub fn texture_to_rgba(gpu: &GpuExecutor, texture: &wgpu::Texture) -> RgbaImage 
     let buffer_slice = buffer.slice(..);
     buffer_slice.map_async(wgpu::MapMode::Read, |r| r.unwrap());
 
-    gpu.device.poll(wgpu::PollType::Wait).unwrap();
+    // wgpu >=v25:
+    // gpu.device.poll(wgpu::PollType::Wait)?;
+    // let result = panic::catch_unwind(|| {
+    gpu.device.poll(wgpu::Maintain::wait()).panic_on_timeout();
+    // });
+
+    // if result.is_err() {
+    //     return Err(Error::msg("Timed out waiting for gpu device"));
+    // }
 
     let padded_data = buffer_slice.get_mapped_range();
     let mut pixels: Vec<u8> = vec![0; unpadded_bytes_per_row * height as usize];
@@ -87,7 +95,7 @@ pub fn texture_to_tensor(
     gpu: &mut GpuExecutor,
     texture: &wgpu::Texture,
     output_range: OutputRange,
-) -> Result<Tensor<f32>> {
+) -> Result<Tensor> {
     let span = span!(Level::DEBUG, "texture_to_tensor");
     let _guard = span.enter();
 
@@ -166,14 +174,22 @@ pub fn texture_to_tensor(
     debug!("Buffer size {buffer_size:?}");
     buffer_slice.map_async(wgpu::MapMode::Read, |r| r.unwrap());
 
-    gpu.device.poll(wgpu::PollType::Wait)?;
+    // wgpu >=v25:
+    // gpu.device.poll(wgpu::PollType::Wait)?;
+    // let result = panic::catch_unwind(|| {
+    gpu.device.poll(wgpu::Maintain::wait()).panic_on_timeout();
+    // });
+
+    // if result.is_err() {
+    //     return Err(Error::msg("Timed out waiting for gpu device"));
+    // }
 
     let buffer_data = buffer_slice.get_mapped_range();
-    let res = bytemuck::cast_slice::<u8, f32>(&*buffer_data).to_vec();
-    let tensor = Tensor::from_array((
-        [1, texture.height() as usize, texture.width() as usize, 3],
+    let res = bytemuck::cast_slice::<u8, f32>(&*buffer_data);
+    let tensor = Tensor::from_shape::<f32>(
+        &[1, texture.height() as usize, texture.width() as usize, 3],
         res,
-    ))?;
+    )?;
     debug!("{tensor:?}");
 
     Ok(tensor)

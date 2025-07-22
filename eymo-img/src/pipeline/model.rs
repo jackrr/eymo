@@ -1,20 +1,16 @@
 use anyhow::Result;
-use ort::execution_providers;
-use ort::session::builder::GraphOptimizationLevel;
-pub use ort::session::Session;
+use tract_onnx::prelude::*;
 
-pub fn initialize_model(model: &[u8], threads: usize) -> Result<Session> {
-    ort::init()
-        .with_execution_providers([execution_providers::XNNPACKExecutionProvider::default()
-            .build()
-            .error_on_failure()])
-        .commit()?;
+pub type Model = SimplePlan<TypedFact, Box<dyn TypedOp>, Graph<TypedFact, Box<dyn TypedOp>>>;
 
-    let model = Session::builder()?
-        .with_optimization_level(GraphOptimizationLevel::Level3)?
-        .with_parallel_execution(true)?
-        .with_inter_threads(threads - 2)?
-        .commit_from_memory(model)?;
+pub fn initialize_model(filename: &str, threads: usize) -> Result<Model> {
+    let model = tract_onnx::onnx()
+        .model_for_path(format!(
+            // TODO: package model into binary
+            "/home/jack/projects/eymo/eymo-img/models/{filename}"
+        ))?
+        .into_optimized()?
+        .into_runnable()?;
 
     Ok(model)
 }

@@ -29,7 +29,8 @@ Shape: Shape = {
 		"rect(" <x:Num> <y:Num> <w:Num> <h:Num> ")" => Shape::Rect(Rect::from_tl(x, y, w, h)),
 		<part:FacePart> "#" <face_idx:Num> => Shape::FaceRef(FaceRef {part, face_idx: Some(FaceIdx::Absolute(face_idx))}),
 		<part:FacePart> "+" <face_rel:Num> => Shape::FaceRef(FaceRef {part, face_idx: Some(FaceIdx::Relative(face_rel as i32))}),
-		<part:FacePart> "-" <face_rel:Num> => Shape::FaceRef(FaceRef {part, face_idx: Some(FaceIdx::Relative(-1 * face_rel as i32))}),
+		// FIXME: -NN parsing is borked
+		// <part:FacePart> "-" <face_rel:Num> => Shape::FaceRef(FaceRef {part, face_idx: Some(FaceIdx::Relative(-1 * face_rel as i32))}),
     <part:FacePart> => Shape::FaceRef(FaceRef { part, face_idx: None }),
 };
 

@@ -8,8 +8,12 @@ features = [ "test" ]
 debug = ["console_error_panic_hook"]
 
 [dependencies]
+anyhow = "1.0.98"
 console_error_panic_hook = { version = "0.1.7", optional = true }
-wasm-bindgen = { version = "0.2.84", optional = true }
+eymo-img = { path = "../eymo-img" }
+wasm-bindgen = { version = "0.2.100" }
+web-sys = { version = "0.3.77", features = ["MediaStream"] }
+
 
 [lib]
 crate-type = ["cdylib"]

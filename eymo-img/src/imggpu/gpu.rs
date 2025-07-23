@@ -27,7 +27,16 @@ impl GpuExecutor {
             },
         };
 
-		    let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
+        #[cfg(target_arch = "wasm32")]
+        let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
+			      required_features: wgpu::Features::empty(),
+			      required_limits: wgpu::Limits::default(),
+			      memory_hints: wgpu::MemoryHints::Performance,
+			      label: Some("device"),
+		    }, None).await.expect("Unable to find a suitable GPU adapter!");
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
 			      required_features: wgpu::Features::empty(),
 			      required_limits: wgpu::Limits::default(),
 			      memory_hints: wgpu::MemoryHints::Performance,

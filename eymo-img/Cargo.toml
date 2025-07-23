@@ -6,7 +6,7 @@ features = [ "test" ]
 
 [dependencies]
 anyhow = "1.0.98"
-bytemuck = "1.23.1"
+bytemuck = { version = "1.23.1", features = ["derive"] }
 image = "0.25.6"
 lalrpop-util = { version = "0.21.0", features = ["lexer", "unicode"] }
 pollster = "0.4.0"

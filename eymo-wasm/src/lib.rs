@@ -36,6 +36,6 @@ impl ImgProcessor {
 fn anyhow_result_to_js_result<T>(r: anyhow::Result<T>) -> Result<T, JsValue> {
     match r {
         Ok(t) => Ok(t),
-        Err(e) => Err(JsValue::from_str(&format!("{e:?}"))),
+        Err(e) => Err(JsValue::from_str(&e.to_string())),
     }
 }

@@ -13,7 +13,11 @@ pollster = "0.4.0"
 robust = "1.2.0"
 tracing = "0.1.41"
 tract-onnx = "0.21.13"
+web-sys = { version = "0.3.77", features = ["HtmlCanvasElement"] }
 wgpu = "24.0.5"
 
 [build-dependencies]
 lalrpop = "0.22.2"
+
+[lib]
+crate-type = ["cdylib", "rlib"]

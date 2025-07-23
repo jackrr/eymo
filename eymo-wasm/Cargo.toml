@@ -10,13 +10,20 @@ debug = ["console_error_panic_hook"]
 [dependencies]
 anyhow = "1.0.98"
 console_error_panic_hook = { version = "0.1.7", optional = true }
+console_log = "1.0.0"
 eymo-img = { path = "../eymo-img" }
 # getrandom is an upstream dependency of tract (dep of eymo-img),
 # this ensures it's added with wasm support
 getrandom = { version = "0.2.16", features = ["js"] }
+log = "0.4.27"
 wasm-bindgen = { version = "0.2.100" }
-web-sys = { version = "0.3.77", features = ["MediaStream"] }
+web-sys = { version = "0.3.77", features = ["HtmlCanvasElement"] }
+wgpu = { version = "24.0.5", features = ["webgpu"] }
 
+[dependencies.nokhwa]
+version = "0.10.9"
+default-features = false
+features = ["input-jscam"]
 
 [lib]
 crate-type = ["cdylib"]

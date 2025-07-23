@@ -801,6 +801,7 @@ dependencies = [
  "robust",
  "tracing",
  "tract-onnx",
+ "web-sys",
  "wgpu",
 ]
 

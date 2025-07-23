@@ -5,6 +5,7 @@ use image::{DynamicImage, RgbaImage};
 use wgpu::ShaderModuleDescriptor;
 use std::collections::HashMap;
 use super::util::padded_bytes_per_row;
+use wgpu::{Surface, SurfaceConfiguration};
 
 pub struct GpuExecutor {
     pub queue: wgpu::Queue,
@@ -13,29 +14,21 @@ pub struct GpuExecutor {
 }
 
 impl GpuExecutor {
+    #[cfg(not(target_arch = "wasm32"))]
     async fn init() -> Result<Self> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
 			      backends: wgpu::Backends::all(),
 			      flags: wgpu::InstanceFlags::VALIDATION,
 			      backend_options: wgpu::BackendOptions::default()
 		    });
-    
-		    let adapter = match instance.request_adapter(&wgpu::RequestAdapterOptions::default()).await {
+
+        let adapter = match instance.request_adapter(&wgpu::RequestAdapterOptions::default()).await {
             Some(adapter) => adapter,
             None => {
                 return Err(Error::msg("Failed to find an appropriate wgpu adapter"));
             },
         };
 
-        #[cfg(target_arch = "wasm32")]
-        let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
-			      required_features: wgpu::Features::empty(),
-			      required_limits: wgpu::Limits::default(),
-			      memory_hints: wgpu::MemoryHints::Performance,
-			      label: Some("device"),
-		    }, None).await.expect("Unable to find a suitable GPU adapter!");
-
-        #[cfg(not(target_arch = "wasm32"))]
         let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
 			      required_features: wgpu::Features::empty(),
 			      required_limits: wgpu::Limits::default(),
@@ -46,10 +39,63 @@ impl GpuExecutor {
         Ok(Self { device, queue, shaders: HashMap::new() })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new() -> Result<Self> {
         let span = span!(Level::DEBUG, "GpuExecutor#new");
         let _guard = span.enter();
         Self::init().block_on()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn init_wasm(canvas: web_sys::HtmlCanvasElement) -> Result<(Self, Surface<'static>, SurfaceConfiguration)> {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+			      backends: wgpu::Backends::BROWSER_WEBGPU,
+			      flags: wgpu::InstanceFlags::VALIDATION,
+			      backend_options: wgpu::BackendOptions::default()
+		    });
+
+        let width = canvas.width();
+        let height = canvas.height();
+
+        let surface = instance.create_surface(wgpu::SurfaceTarget::Canvas(canvas))?;
+
+        let adapter = match instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::default(),
+            compatible_surface: Some(&surface),
+            force_fallback_adapter: false,
+        }).await {
+            Some(adapter) => adapter,
+            None => {
+                return Err(Error::msg("Failed to find an appropriate wgpu adapter"));
+            },
+        };
+
+        let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
+			      required_features: wgpu::Features::empty(),
+			      required_limits: wgpu::Limits::default(),
+			      memory_hints: wgpu::MemoryHints::Performance,
+			      label: Some("device"),
+		    }, None).await.expect("Unable to find a suitable GPU adapter!");
+
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            width,
+            height,
+            present_mode: Default::default(),
+            alpha_mode: Default::default(),
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+
+        Ok((Self { device, queue, shaders: HashMap::new() }, surface, config))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn new_wasm(canvas: web_sys::HtmlCanvasElement) -> Result<(Self, Surface<'static>, SurfaceConfiguration)> {
+        let span = span!(Level::DEBUG, "GpuExecutor#new_wasm");
+        let _guard = span.enter();
+        Self::init_wasm(canvas).block_on()
     }
 
     pub fn load_shader(&mut self, name: &str, desc: ShaderModuleDescriptor) -> wgpu::ShaderModule {

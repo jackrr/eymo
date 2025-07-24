@@ -47,7 +47,7 @@ impl GpuExecutor {
     }
 
     #[cfg(target_arch = "wasm32")]
-    async fn init_wasm(canvas: web_sys::HtmlCanvasElement) -> Result<(Self, Surface<'static>, SurfaceConfiguration)> {
+    pub async fn new_wasm(canvas: web_sys::HtmlCanvasElement) -> Result<(Self, Surface<'static>, SurfaceConfiguration)> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
 			      backends: wgpu::Backends::BROWSER_WEBGPU,
 			      flags: wgpu::InstanceFlags::VALIDATION,
@@ -89,13 +89,6 @@ impl GpuExecutor {
         };
 
         Ok((Self { device, queue, shaders: HashMap::new() }, surface, config))
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    pub fn new_wasm(canvas: web_sys::HtmlCanvasElement) -> Result<(Self, Surface<'static>, SurfaceConfiguration)> {
-        let span = span!(Level::DEBUG, "GpuExecutor#new_wasm");
-        let _guard = span.enter();
-        Self::init_wasm(canvas).block_on()
     }
 
     pub fn load_shader(&mut self, name: &str, desc: ShaderModuleDescriptor) -> wgpu::ShaderModule {

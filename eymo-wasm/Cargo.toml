@@ -17,6 +17,7 @@ eymo-img = { path = "../eymo-img" }
 getrandom = { version = "0.2.16", features = ["js"] }
 log = "0.4.27"
 wasm-bindgen = { version = "0.2.100" }
+wasm-bindgen-futures = "0.4.50"
 web-sys = { version = "0.3.77", features = ["HtmlCanvasElement"] }
 wgpu = { version = "24.0.5", features = ["webgpu"] }
 

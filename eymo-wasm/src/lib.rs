@@ -6,7 +6,7 @@ mod util;
 use eymo_img::imggpu::gpu::GpuExecutor;
 use eymo_img::lang;
 use eymo_img::pipeline::Pipeline;
-use log::{error, info};
+use log::{debug, error, info};
 use nokhwa::pixel_format::RgbAFormat;
 use nokhwa::utils::{RequestedFormat, RequestedFormatType};
 use wasm_bindgen::prelude::*;
@@ -24,26 +24,28 @@ pub struct State {
 
 #[wasm_bindgen(start)]
 fn main() -> Result<(), JsValue> {
-    info!("Loaded! Setting panic hook...");
-    console_log::init_with_level(log::Level::Info).unwrap_throw();
+    console_log::init_with_level(log::Level::Debug).unwrap_throw();
+    debug!("Loaded! Setting panic hook...");
     util::set_panic_hook();
     Ok(())
 }
 
 #[wasm_bindgen]
 impl State {
-    fn new_anyhow() -> anyhow::Result<Self> {
+    async fn new_anyhow() -> anyhow::Result<Self> {
         let browser_window = wgpu::web_sys::window().unwrap_throw();
         let document = browser_window.document().unwrap_throw();
         let canvas = document.get_element_by_id("canvas").unwrap_throw();
         let html_canvas_element = canvas.unchecked_into();
 
-        let command = "mouth: swap_with(leye_region), scale(2)";
-        let (mut gpu, surface, config) = GpuExecutor::new_wasm(html_canvas_element)?;
+        let command = "mouth: swap_with(leye_region), scale(2)\n";
+        debug!("Initializing gpu");
+        let (mut gpu, surface, config) = GpuExecutor::new_wasm(html_canvas_element).await?;
 
         // NOTE: to resize canvas, just call configure again with updated width + height on config
         surface.configure(&gpu.device, &config);
 
+        debug!("Interpreting command");
         let interpreter = lang::parse(command, &mut gpu)?;
         let pipeline = Pipeline::new()?;
 
@@ -67,8 +69,9 @@ impl State {
     }
 
     #[wasm_bindgen(constructor)]
-    pub fn new() -> Result<Self, JsValue> {
-        wrap_err(Self::new_anyhow())
+    pub async fn new() -> Result<Self, JsValue> {
+        debug!("Constructor for State...");
+        wrap_err(Self::new_anyhow().await)
     }
 
     #[wasm_bindgen]

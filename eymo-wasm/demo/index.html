@@ -15,7 +15,7 @@
 				await init();
 
 				console.log("Initializing 'state'...");
-				let thing = new State();
+				let thing = await new State();
 
 				console.log("Starting the whole thingy...")
 				thing.start();

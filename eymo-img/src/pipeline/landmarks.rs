@@ -57,7 +57,7 @@ impl FaceLandmarker {
 
     // FIXME: when face is notably tilted detections get
     // wonky.. something wrong with rotation in here probably
-    pub fn run_gpu(
+    pub async fn run_gpu(
         &mut self,
         face: &detection::Face,
         tex: &wgpu::Texture,
@@ -207,7 +207,7 @@ impl FaceLandmarker {
         gpu.queue.submit(std::iter::once(encoder.finish()));
 
         let tensor =
-            imggpu::rgb::texture_to_tensor(gpu, &output_tex, imggpu::rgb::OutputRange::ZeroToOne)?;
+            imggpu::rgb::texture_to_tensor(gpu, &output_tex, imggpu::rgb::OutputRange::ZeroToOne).await?;
 
         let outputs = self.model.run(tvec!(tensor.into()))?;
         let output = outputs[0].to_array_view::<f32>()?;

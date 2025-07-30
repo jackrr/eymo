@@ -2,7 +2,7 @@ use super::gpu::GpuExecutor;
 use super::util::{int_div_round_up, padded_bytes_per_row};
 use anyhow::Result;
 use image::RgbaImage;
-use tracing::{debug, info, span, Level};
+use tracing::{span, Level};
 use tract_onnx::prelude::Tensor;
 
 pub enum OutputRange {
@@ -91,7 +91,7 @@ pub fn texture_to_rgba(gpu: &GpuExecutor, texture: &wgpu::Texture) -> RgbaImage 
     RgbaImage::from_raw(width, height, pixels).unwrap()
 }
 
-pub fn texture_to_tensor(
+pub async fn texture_to_tensor(
     gpu: &mut GpuExecutor,
     texture: &wgpu::Texture,
     output_range: OutputRange,
@@ -173,11 +173,16 @@ pub fn texture_to_tensor(
     let buffer_slice = map_buffer.slice(..);
     let (s, r) = futures::channel::oneshot::channel();
 
-    info!("Mapping buffer..");
+    // Theory: In wasm land, the callback needs this calling logic to
+    // run async, so that this function can pause while the callback
+    // executes on the event loop.
+    // My silly hack using a loop that checks the status of a oneshot
+    // channel doesn't work, because the checking loop is hogging the
+    // event loop, preventing the callback from running...
+    // Can't see a way other than making this logic async...
     buffer_slice.map_async(wgpu::MapMode::Read, |r| {
-        info!("In map callback!");
-        r.unwrap();
         s.send(()).unwrap();
+        r.unwrap();
     });
 
     // wgpu >=v25:
@@ -190,19 +195,14 @@ pub fn texture_to_tensor(
     //     return Err(Error::msg("Timed out waiting for gpu device"));
     // }
 
-    // FIXME: This freezes..., but we need to wait for callback to finish on web!
-    futures::executor::block_on(async { r.await })?;
-
-    // FIXME: This is where it errors on wasm
-    info!("CALLING get mapped range..");
+    r.await?;
+    
     let buffer_data = buffer_slice.get_mapped_range();
-    info!("Done mapping");
     let res = bytemuck::cast_slice::<u8, f32>(&*buffer_data);
     let tensor = Tensor::from_shape::<f32>(
         &[1, texture.height() as usize, texture.width() as usize, 3],
         res,
     )?;
-    debug!("{tensor:?}");
 
     Ok(tensor)
 }

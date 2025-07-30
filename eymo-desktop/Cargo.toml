@@ -13,3 +13,4 @@ image = "0.25.6"
 nokhwa = { version = "0.10.7", features = ["input-native", "input-jscam"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+pollster = "0.4.0"

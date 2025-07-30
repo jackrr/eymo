@@ -38,17 +38,17 @@ impl Pipeline {
         })
     }
 
-    pub fn run_gpu(&mut self, tex: &wgpu::Texture, gpu: &mut GpuExecutor) -> Result<Detection> {
+    pub async fn run_gpu(&mut self, tex: &wgpu::Texture, gpu: &mut GpuExecutor) -> Result<Detection> {
         let span = span!(Level::DEBUG, "pipeline");
         let _guard = span.enter();
 
         info!("Starting face detector..");
-        let face_bounds = self.face_detector.run_gpu(tex, gpu)?;
+        let face_bounds = self.face_detector.run_gpu(tex, gpu).await?;
         let mut faces = Vec::new();
         for face_bound in face_bounds {
             trace!("Face bound: {face_bound:?}");
 
-            let face = self.face_landmarker.run_gpu(&face_bound, tex, gpu)?;
+            let face = self.face_landmarker.run_gpu(&face_bound, tex, gpu).await?;
             trace!("Face features: {face:?}");
 
             faces.push(face);

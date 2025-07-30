@@ -1,3 +1,4 @@
+#[cfg(not(target_arch = "wasm32"))]
 use pollster::FutureExt;
 use anyhow::{Error, Result};
 use tracing::{span, Level};
@@ -5,6 +6,7 @@ use image::{DynamicImage, RgbaImage};
 use wgpu::ShaderModuleDescriptor;
 use std::collections::HashMap;
 use super::util::padded_bytes_per_row;
+#[cfg(target_arch = "wasm32")]
 use wgpu::{Surface, SurfaceConfiguration};
 
 pub struct GpuExecutor {
@@ -78,13 +80,13 @@ impl GpuExecutor {
 		    }, None).await.expect("Unable to find a suitable GPU adapter!");
 
         let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: wgpu::TextureFormat::Rgba8Unorm,
+            view_formats: vec![wgpu::TextureFormat::Rgba8Unorm],
+            usage: wgpu::TextureUsages::COPY_DST,
             width,
             height,
             present_mode: Default::default(),
             alpha_mode: Default::default(),
-            view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
 

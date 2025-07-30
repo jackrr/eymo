@@ -7,6 +7,7 @@ use eymo_img::lang;
 use eymo_img::pipeline::{Detection, Pipeline};
 use image::RgbaImage;
 use nokhwa::pixel_format::RgbAFormat;
+use pollster::FutureExt;
 use std::path::PathBuf;
 use std::time::Instant;
 use tracing::{debug, error, span, trace, warn, Level};
@@ -172,7 +173,7 @@ fn process_frame(
         Some(d) => d,
         None => {
             store_detection = true;
-            pipeline.run_gpu(&texture, gpu)?
+            pipeline.run_gpu(&texture, gpu).block_on()?
         }
     };
 

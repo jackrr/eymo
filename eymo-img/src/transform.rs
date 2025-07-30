@@ -3,8 +3,8 @@ use crate::shapes::point::Point;
 use crate::shapes::shape::Shape;
 use crate::{imggpu::gpu::GpuExecutor, shapes::rect::Rect};
 use std::collections::HashMap;
-use std::time::Instant;
 use tracing::{span, warn, Level};
+use web_time::Instant;
 use wgpu::util::DeviceExt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

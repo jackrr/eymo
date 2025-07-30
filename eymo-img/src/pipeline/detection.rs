@@ -74,7 +74,7 @@ impl FaceDetector {
         })
     }
 
-    pub fn run_gpu(&mut self, tex: &wgpu::Texture, gpu: &mut GpuExecutor) -> Result<Vec<Face>> {
+    pub async fn run_gpu(&mut self, tex: &wgpu::Texture, gpu: &mut GpuExecutor) -> Result<Vec<Face>> {
         let span = span!(Level::DEBUG, "face_detector");
         let _guard = span.enter();
 
@@ -213,7 +213,8 @@ impl FaceDetector {
             gpu,
             &resize_output_tex,
             imggpu::rgb::OutputRange::NegOneToOne,
-        )?;
+        )
+        .await?;
         let outputs = self.model.run(tvec!(tensor.into()))?;
 
         let x_scale = tex.width() as f32 / WIDTH as f32;

@@ -25,7 +25,7 @@ wgpu = { version = "24.0.5", features = ["webgpu"] }
 
 [dependencies.web-sys]
 version = "0.3.77"
-features = ["HtmlCanvasElement", "MediaDevices", "MediaStream", "MediaStreamConstraints", "MediaStreamTrackProcessor", "MediaStreamTrackProcessorInit", "MediaStreamTrack", "ReadableStream", "ReadableStreamDefaultReader", "VideoFrame"]
+features = ["HtmlCanvasElement", "MediaDevices", "MediaStream", "MediaStreamConstraints", "MediaStreamTrackProcessor", "MediaStreamTrackProcessorInit", "MediaStreamTrack", "ReadableStream", "ReadableStreamDefaultReader", "VideoFrame", "VideoPixelFormat", "VideoFrameCopyToOptions"]
 
 [lib]
 crate-type = ["cdylib"]

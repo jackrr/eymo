@@ -1,6 +1,7 @@
 // What follows liberally draws from:
 // https://sotrh.github.io/learn-wgpu/beginner/tutorial1-window/#the-code
 
+mod img;
 mod util;
 
 use eymo_img::imggpu::gpu::GpuExecutor;
@@ -40,6 +41,7 @@ impl State {
         let html_canvas_element = canvas.unchecked_into();
         let (mut gpu, surface, config) = GpuExecutor::new_wasm(html_canvas_element).await?;
 
+        // TODO: detect canvas resize and call configure
         // NOTE: to resize canvas, just call configure again with updated width + height on config
         surface.configure(&gpu.device, &config);
 
@@ -69,7 +71,7 @@ impl State {
 
     #[wasm_bindgen]
     pub async fn start(&mut self) -> Result<(), JsValue> {
-        info!("Loading camera...");
+        debug!("Loading camera...");
         let browser_window = wgpu::web_sys::window().unwrap_throw();
         let devices = browser_window.navigator().media_devices().unwrap_throw();
         let constraints = MediaStreamConstraints::new();
@@ -78,8 +80,6 @@ impl State {
         let vid = stream.get_video_tracks().get(0).unchecked_into::<MediaStreamTrack>();
         let proc = MediaStreamTrackProcessor::new(&MediaStreamTrackProcessorInit::new(&vid))?;
         let reader = proc.readable().get_reader().unchecked_into::<ReadableStreamDefaultReader>();
-        // error!("Initializing frame buffer");
-        // let mut frame_buffer: [u8; FRAME_BUFFER_SIZE] = [0; FRAME_BUFFER_SIZE];
 
         loop {
             match JsFuture::from(reader.read()).await {
@@ -88,15 +88,9 @@ impl State {
                         js_sys::Reflect::get(&js_frame, &js_sys::JsString::from("value"))
                             .unwrap()
                             .unchecked_into::<VideoFrame>();
-                    
-                    let width = video_frame.coded_width();
-                    let height = video_frame.coded_height();
-                    let img = image::RgbaImage::new(width, height);
-                    let mut img_data = img.into_raw();
-                    JsFuture::from(video_frame.copy_to_with_u8_slice(&mut img_data)).await.unwrap();
-                    let img = image::RgbaImage::from_raw(width, height, img_data).unwrap();
-
-                    match self.process_frame(img) {
+                    info!("{}x{}", video_frame.coded_width(), video_frame.coded_height());
+                    let img = img::from_frame(&video_frame).await?;
+                    match self.process_frame(img).await {
                         Ok(_) => {}
                         Err(e) => {
                             error!("Failed to process frame: {}", e.to_string());
@@ -114,22 +108,24 @@ impl State {
         Ok(())
     }
 
-    fn process_frame(&mut self, input_image: image::RgbaImage) -> anyhow::Result<()> {
+    async fn process_frame(&mut self, input_image: image::RgbaImage) -> anyhow::Result<()> {
         let input = self.gpu.rgba_buffer_to_texture(
             input_image.as_raw(),
             input_image.width(),
             input_image.height(),
         );
-        info!("Running detection..");
-        let detection = self.pipeline.run_gpu(&input, &mut self.gpu)?;
+        debug!("Running detection..");
+        let detection = self.pipeline.run_gpu(&input, &mut self.gpu).await?;
 
-        info!("Running transforms..");
+        debug!("Running transforms..");
         let result = self
             .interpreter
             .execute(&detection, input, &mut self.gpu, |_| Ok(()));
 
-        info!("Copying result to 'surface'...");
+        debug!("Copying result to 'surface'...");
         let output = self.surface.get_current_texture()?;
+
+        // TODO: scale texture to canvas dimensions (goal: result.size == output.size)
 
         let mut encoder = self
             .gpu
@@ -156,7 +152,7 @@ impl State {
 
         self.gpu.queue.submit(std::iter::once(encoder.finish()));
 
-        info!("Presenting!...");
+        debug!("Presenting!...");
         output.present();
 
         Ok(())

@@ -794,6 +794,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytemuck",
+ "futures",
  "image",
  "lalrpop",
  "lalrpop-util 0.21.0",

@@ -2,7 +2,7 @@ use super::gpu::GpuExecutor;
 use super::util::{int_div_round_up, padded_bytes_per_row};
 use anyhow::Result;
 use image::RgbaImage;
-use tracing::{debug, span, Level};
+use tracing::{debug, info, span, Level};
 use tract_onnx::prelude::Tensor;
 
 pub enum OutputRange {
@@ -171,8 +171,14 @@ pub fn texture_to_tensor(
     gpu.queue.submit(std::iter::once(encoder.finish()));
 
     let buffer_slice = map_buffer.slice(..);
-    debug!("Buffer size {buffer_size:?}");
-    buffer_slice.map_async(wgpu::MapMode::Read, |r| r.unwrap());
+    let (s, r) = futures::channel::oneshot::channel();
+
+    info!("Mapping buffer..");
+    buffer_slice.map_async(wgpu::MapMode::Read, |r| {
+        info!("In map callback!");
+        r.unwrap();
+        s.send(()).unwrap();
+    });
 
     // wgpu >=v25:
     // gpu.device.poll(wgpu::PollType::Wait)?;
@@ -184,7 +190,13 @@ pub fn texture_to_tensor(
     //     return Err(Error::msg("Timed out waiting for gpu device"));
     // }
 
+    // FIXME: This freezes..., but we need to wait for callback to finish on web!
+    futures::executor::block_on(async { r.await })?;
+
+    // FIXME: This is where it errors on wasm
+    info!("CALLING get mapped range..");
     let buffer_data = buffer_slice.get_mapped_range();
+    info!("Done mapping");
     let res = bytemuck::cast_slice::<u8, f32>(&*buffer_data);
     let tensor = Tensor::from_shape::<f32>(
         &[1, texture.height() as usize, texture.width() as usize, 3],

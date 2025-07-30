@@ -4,7 +4,7 @@ use crate::shapes::rect::Rect;
 use crate::{imggpu::gpu::GpuExecutor, shapes::polygon::Polygon};
 use detection::FaceDetector;
 use landmarks::FaceLandmarker;
-use tracing::{span, trace, Level};
+use tracing::{info, span, trace, Level};
 
 mod detection;
 mod landmarks;
@@ -42,6 +42,7 @@ impl Pipeline {
         let span = span!(Level::DEBUG, "pipeline");
         let _guard = span.enter();
 
+        info!("Starting face detector..");
         let face_bounds = self.face_detector.run_gpu(tex, gpu)?;
         let mut faces = Vec::new();
         for face_bound in face_bounds {

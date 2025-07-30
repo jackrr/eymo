@@ -1,1 +1,2 @@
-mouth: scale(2), saturate(1.3), brighten(1.2), drift(100, 60), spin(0.3)
+mouth: swap_with(mouth+1), scale(2), saturate(1.3), brighten(1.2), spin(0.3)
+

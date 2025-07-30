@@ -6,7 +6,7 @@ use crate::shapes::point::PointF32;
 use crate::shapes::rect::{Rect, RectF32};
 use anchors::gen_anchors;
 use anyhow::Result;
-use tracing::{span, trace, Level};
+use tracing::{info, span, trace, Level};
 use tract_onnx::prelude::tvec;
 use wgpu::util::DeviceExt;
 
@@ -207,6 +207,7 @@ impl FaceDetector {
         drop(render_pass);
 
         gpu.queue.submit(std::iter::once(encoder.finish()));
+        info!("Completed render pass in detection step!");
 
         let tensor = imggpu::rgb::texture_to_tensor(
             gpu,

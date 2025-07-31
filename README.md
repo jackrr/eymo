@@ -4,13 +4,15 @@ Ey(e)mo(uth) is a program that does fun things with a video stream of a face.
 
 ## Installation / first time setup
 
-TODO: either document where to get compiled releases or document how
-to (trivially) build after cloning
+### Desktop
 
-### External Dependencies
+1. Clone this repo
+2. Ensure you have [rust](https://www.rust-lang.org/tools/install) and [ffmpeg](https://ffmpeg.org/) installed
+3. Run: `cargo build --release` from within the `eymo-desktop` directory
 
-- [rust](https://www.rust-lang.org/tools/install)
-- [ffmpeg](https://ffmpeg.org/)
+Compiled binary will be at
+`./eymo-desktop/target/release/eymo-desktop`. Run the command to see
+usage instructions.
 
 By default, eymo will stream output to a child `ffplay` process for
 display in a window. To stream output to a virtual webcam device see
@@ -25,7 +27,19 @@ output to a virtual camera at `/dev/video1` created by v4l2loopback.
 
 #### MacOS
 
-TODO
+Help Wanted: https://github.com/jackrr/eymo/issues/11
+
+### WASM
+
+NOTE: WASM implementation is still WIP!!
+
+1. Clone this repo
+2. Ensure you have [rust](https://www.rust-lang.org/tools/install) installed
+3. Install [`wasm-pack`](https://drager.github.io/wasm-pack/installer/)
+4. Run: `wasm-pack build -t web --release` from within the `eymo-wasm` directory
+
+Compiled output will be in `./eymo-wasm/pkg/`. See `demo/index.html`
+for an example of how to use the generated code.
 
 ## Configuration language
 

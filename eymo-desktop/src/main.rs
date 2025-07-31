@@ -1,12 +1,13 @@
 #![warn(unused_extern_crates)]
 use anyhow::{Error, Result};
 use clap::{Args, Parser};
+use eymo_img::imggpu::gpu::GpuExecutor;
+use eymo_img::imggpu::rgb;
+use eymo_img::lang;
+use eymo_img::pipeline::{Detection, Pipeline};
 use image::RgbaImage;
-use imggpu::gpu::GpuExecutor;
-use imggpu::rgb;
 use nokhwa::pixel_format::RgbAFormat;
-use num_cpus::get as get_cpu_count;
-use pipeline::Pipeline;
+use pollster::FutureExt;
 use std::path::PathBuf;
 use std::time::Instant;
 use tracing::{debug, error, span, trace, warn, Level};
@@ -14,21 +15,12 @@ use tracing_subscriber;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::EnvFilter;
 use video::{create_input_stream, OutputVideoStream};
-mod imggpu;
-mod lang;
-mod pipeline;
-mod shapes;
-mod transform;
-mod triangulate;
+
 mod video;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct CmdArgs {
-    /// Max threads to fanout work onto
-    #[arg(short = 't', long)]
-    threads: Option<usize>,
-
     /// Max delay (ms) before timing out processing a thread
     #[arg(short = 'l', long)]
     max_frame_lag_ms: Option<u32>,
@@ -42,7 +34,7 @@ struct CmdArgs {
         short,
         long,
         value_name = "FILE",
-        default_value = "examples/rotate-face.eymo"
+        default_value = "../eymo-img/examples/rotate-face.eymo"
     )]
     config: PathBuf,
 
@@ -76,9 +68,7 @@ fn main() -> Result<()> {
 
     let args = CmdArgs::parse();
 
-    let total_threads = get_cpu_count();
-    let total_threads = args.threads.unwrap_or(total_threads).min(total_threads);
-    let mut pipeline = Pipeline::new(total_threads / 2)?;
+    let mut pipeline = Pipeline::new()?;
     let mut gpu = GpuExecutor::new()?;
     let mut interpreter = lang::parse(&std::fs::read_to_string(args.config)?, &mut gpu)?;
 
@@ -168,7 +158,7 @@ fn process_frame(
     gpu: &mut GpuExecutor,
     pipeline: &mut Pipeline,
     interpreter: &mut lang::Interpreter,
-    detection_cache: &mut Option<pipeline::Detection>,
+    detection_cache: &mut Option<Detection>,
     within_ms: Option<u32>,
 ) -> Result<RgbaImage> {
     let span = span!(Level::DEBUG, "process_frame");
@@ -183,7 +173,7 @@ fn process_frame(
         Some(d) => d,
         None => {
             store_detection = true;
-            pipeline.run_gpu(&texture, gpu)?
+            pipeline.run_gpu(&texture, gpu).block_on()?
         }
     };
 

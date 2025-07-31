@@ -1,5 +1,5 @@
 use super::detection;
-use super::model::{initialize_model, Session};
+use super::model::{initialize_model, Model};
 use super::Face;
 use crate::imggpu;
 use crate::imggpu::gpu::GpuExecutor;
@@ -8,12 +8,12 @@ use crate::shapes::point::Point;
 use crate::shapes::polygon::Polygon;
 use crate::shapes::rect::Rect;
 use anyhow::Result;
-use ort::session::SessionOutputs;
 use tracing::{debug, span, Level};
+use tract_onnx::prelude::tvec;
 use wgpu::util::DeviceExt;
 
 pub struct FaceLandmarker {
-    model: Session,
+    model: Model,
 }
 
 const HEIGHT: u32 = 192;
@@ -46,18 +46,18 @@ const NOSE_IDXS: [usize; 23] = [
     419, 351, 417,
 ];
 
-const MODEL: &[u8; 2429047] = include_bytes!("../../models/mediapipe_face_landmark.onnx");
+const MODEL: &[u8; 2429047] = include_bytes!("./mediapipe_face_landmark.onnx");
 
 impl FaceLandmarker {
-    pub fn new(threads: usize) -> Result<FaceLandmarker> {
+    pub fn new() -> Result<FaceLandmarker> {
         Ok(FaceLandmarker {
-            model: initialize_model(MODEL, threads)?,
+            model: initialize_model(MODEL)?,
         })
     }
 
     // FIXME: when face is notably tilted detections get
     // wonky.. something wrong with rotation in here probably
-    pub fn run_gpu(
+    pub async fn run_gpu(
         &mut self,
         face: &detection::Face,
         tex: &wgpu::Texture,
@@ -207,24 +207,24 @@ impl FaceLandmarker {
         gpu.queue.submit(std::iter::once(encoder.finish()));
 
         let tensor =
-            imggpu::rgb::texture_to_tensor(gpu, &output_tex, imggpu::rgb::OutputRange::ZeroToOne)?;
-        let outputs = self.model.run(ort::inputs!["input_1" => tensor]?)?;
-        extract_results(outputs, WIDTH, HEIGHT, bounds, -theta)
+            imggpu::rgb::texture_to_tensor(gpu, &output_tex, imggpu::rgb::OutputRange::ZeroToOne).await?;
+
+        let outputs = self.model.run(tvec!(tensor.into()))?;
+        let output = outputs[0].to_array_view::<f32>()?;
+        let mesh = output.squeeze().squeeze().squeeze();
+        let r = mesh.as_slice().unwrap();
+
+        extract_results(r, WIDTH, HEIGHT, bounds, -theta)
     }
 }
 
 fn extract_results(
-    outputs: SessionOutputs,
+    r: &[f32],
     input_width: u32,
     input_height: u32,
     run_bounds: Rect,
     run_rot: f32,
 ) -> Result<Face> {
-    let output = outputs["conv2d_21"].try_extract_tensor::<f32>()?;
-    let mesh = output.squeeze().squeeze().squeeze();
-
-    let r = mesh.as_slice().unwrap();
-
     let x_scale = run_bounds.w as f32 / input_width as f32;
     let y_scale = run_bounds.h as f32 / input_height as f32;
     let x_offset = run_bounds.left() as f32;
@@ -234,13 +234,13 @@ fn extract_results(
     Ok(Face {
         bound: run_bounds,
         face: extract_feature(
-            &r, &FACE_IDXS, x_offset, y_offset, x_scale, y_scale, &origin, run_rot,
+            r, &FACE_IDXS, x_offset, y_offset, x_scale, y_scale, &origin, run_rot,
         ),
         nose: extract_feature(
-            &r, &NOSE_IDXS, x_offset, y_offset, x_scale, y_scale, &origin, run_rot,
+            r, &NOSE_IDXS, x_offset, y_offset, x_scale, y_scale, &origin, run_rot,
         ),
         mouth: extract_feature(
-            &r,
+            r,
             &MOUTH_IDXS,
             x_offset,
             y_offset,
@@ -250,7 +250,7 @@ fn extract_results(
             run_rot,
         ),
         l_eye: extract_feature(
-            &r,
+            r,
             &L_EYE_IDXS,
             x_offset,
             y_offset,
@@ -260,7 +260,7 @@ fn extract_results(
             run_rot,
         ),
         l_eye_region: extract_feature(
-            &r,
+            r,
             &L_EYE_REGION_IDXS,
             x_offset,
             y_offset,
@@ -270,7 +270,7 @@ fn extract_results(
             run_rot,
         ),
         r_eye_region: extract_feature(
-            &r,
+            r,
             &R_EYE_REGION_IDXS,
             x_offset,
             y_offset,
@@ -280,7 +280,7 @@ fn extract_results(
             run_rot,
         ),
         r_eye: extract_feature(
-            &r,
+            r,
             &R_EYE_IDXS,
             x_offset,
             y_offset,

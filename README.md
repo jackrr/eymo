@@ -4,6 +4,9 @@ Ey(e)mo(uth) is a program that does fun things with a video stream of a face.
 
 ## Installation / first time setup
 
+TODO: either document where to get compiled releases or document how
+to (trivially) build after cloning
+
 ### External Dependencies
 
 - [rust](https://www.rust-lang.org/tools/install)
@@ -104,7 +107,5 @@ channels(1.5, 0.5, 0.8) // increase/decrease rgb levels by given factors (in thi
 - [lalrpop](https://github.com/lalrpop/lalrpop) language parser
 - [mediapipe](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker) face detection and landmarker models
 - [nokwha](https://github.com/l1npengtul/nokhwa) cross-platform webcam streaming
-- [ort](https://github.com/pykeio/ort) model inference execution runtime
+- [tract](http://github.com/sonos/tract) model inference execution runtime
 - [wgpu](https://github.com/gfx-rs/wgpu) cross-platform GPU execution of image manipulations
-
-## License - TODO

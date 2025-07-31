@@ -1,0 +1,39 @@
+[package]
+name = "eymo-wasm"
+authors = ["Jack Ratner"]
+description = "WASM bundle for manipulating faces on a webcam stream"
+version = "0.0.0"
+edition = "2024"
+features = [ "test" ]
+license = "MIT"
+repository = "https://github.com/jackrr/eymo"
+
+[features]
+debug = ["console_error_panic_hook"]
+
+[dependencies]
+anyhow = "1.0.98"
+console_error_panic_hook = { version = "0.1.7", optional = true }
+eymo-img = { path = "../eymo-img" }
+# getrandom is an upstream dependency of tract (dep of eymo-img),
+# this ensures it's added with wasm support
+getrandom = { version = "0.2.16", features = ["js"] }
+image = "0.25.6"
+js-sys = "0.3.77"
+log = "0.4.27"
+tracing = "0.1.41"
+tracing-wasm = "0.2.1"
+wasm-bindgen = { version = "0.2.100" }
+wasm-bindgen-futures = "0.4.50"
+wgpu = { version = "24.0.5", features = ["webgpu"] }
+
+[dependencies.web-sys]
+version = "0.3.77"
+features = ["HtmlCanvasElement", "MediaDevices", "MediaStream", "MediaStreamConstraints", "MediaStreamTrackProcessor", "MediaStreamTrackProcessorInit", "MediaStreamTrack", "ReadableStream", "ReadableStreamDefaultReader", "VideoFrame", "VideoPixelFormat", "VideoFrameCopyToOptions"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+# Tell `rustc` to optimize for small code size.
+opt-level = "s"

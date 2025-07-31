@@ -1,10 +1,13 @@
+#[cfg(not(target_arch = "wasm32"))]
 use pollster::FutureExt;
-use anyhow::Result;
+use anyhow::{Error, Result};
 use tracing::{span, Level};
 use image::{DynamicImage, RgbaImage};
 use wgpu::ShaderModuleDescriptor;
 use std::collections::HashMap;
 use super::util::padded_bytes_per_row;
+#[cfg(target_arch = "wasm32")]
+use wgpu::{Surface, SurfaceConfiguration};
 
 pub struct GpuExecutor {
     pub queue: wgpu::Queue,
@@ -13,30 +16,81 @@ pub struct GpuExecutor {
 }
 
 impl GpuExecutor {
+    #[cfg(not(target_arch = "wasm32"))]
     async fn init() -> Result<Self> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
 			      backends: wgpu::Backends::all(),
 			      flags: wgpu::InstanceFlags::VALIDATION,
 			      backend_options: wgpu::BackendOptions::default()
 		    });
-    
-		    let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions::default()).await?;
 
-		    let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
+        let adapter = match instance.request_adapter(&wgpu::RequestAdapterOptions::default()).await {
+            Some(adapter) => adapter,
+            None => {
+                return Err(Error::msg("Failed to find an appropriate wgpu adapter"));
+            },
+        };
+
+        let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
 			      required_features: wgpu::Features::empty(),
 			      required_limits: wgpu::Limits::default(),
 			      memory_hints: wgpu::MemoryHints::Performance,
 			      label: Some("device"),
-			      trace: wgpu::Trace::Off
-		    }).await?;
+		    }, None).await?;
 
         Ok(Self { device, queue, shaders: HashMap::new() })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new() -> Result<Self> {
         let span = span!(Level::DEBUG, "GpuExecutor#new");
         let _guard = span.enter();
         Self::init().block_on()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub async fn new_wasm(canvas: web_sys::HtmlCanvasElement) -> Result<(Self, Surface<'static>, SurfaceConfiguration)> {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+			      backends: wgpu::Backends::BROWSER_WEBGPU,
+			      flags: wgpu::InstanceFlags::VALIDATION,
+			      backend_options: wgpu::BackendOptions::default()
+		    });
+
+        let width = canvas.width();
+        let height = canvas.height();
+
+        let surface = instance.create_surface(wgpu::SurfaceTarget::Canvas(canvas))?;
+
+        let adapter = match instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::default(),
+            compatible_surface: Some(&surface),
+            force_fallback_adapter: false,
+        }).await {
+            Some(adapter) => adapter,
+            None => {
+                return Err(Error::msg("Failed to find an appropriate wgpu adapter"));
+            },
+        };
+
+        let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
+			      required_features: wgpu::Features::empty(),
+			      required_limits: wgpu::Limits::default(),
+			      memory_hints: wgpu::MemoryHints::Performance,
+			      label: Some("device"),
+		    }, None).await.expect("Unable to find a suitable GPU adapter!");
+
+        let config = wgpu::SurfaceConfiguration {
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            view_formats: vec![wgpu::TextureFormat::Rgba8Unorm],
+            usage: wgpu::TextureUsages::COPY_DST,
+            width,
+            height,
+            present_mode: Default::default(),
+            alpha_mode: Default::default(),
+            desired_maximum_frame_latency: 2,
+        };
+
+        Ok((Self { device, queue, shaders: HashMap::new() }, surface, config))
     }
 
     pub fn load_shader(&mut self, name: &str, desc: ShaderModuleDescriptor) -> wgpu::ShaderModule {
@@ -94,7 +148,15 @@ impl GpuExecutor {
         let buffer_slice = buffer.slice(..);
         buffer_slice.map_async(wgpu::MapMode::Read, |r| r.unwrap());
 
-        self.device.poll(wgpu::PollType::Wait).unwrap();
+        // wgpu >=v25:
+        // self.device.poll(wgpu::PollType::Wait)?;
+        // let result = panic::catch_unwind(|| {
+        self.device.poll(wgpu::Maintain::wait()).panic_on_timeout();
+        // });
+
+        // if result.is_err() {
+        //     return Err(Error::msg("Timed out waiting for gpu device"));
+        // }
 
         let padded_data = buffer_slice.get_mapped_range();
         let mut pixels: Vec<u8> = vec![0; unpadded_bytes_per_row * height as usize];

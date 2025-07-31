@@ -1,25 +1,20 @@
 [package]
-name = "eymo"
-version = "0.1.0"
+name = "eymo-desktop"
+authors = ["Jack Ratner"]
+description = "Desktop application for manipulating faces on an image or video stream"
+version = "0.0.0"
 edition = "2024"
 features = [ "test" ]
+license = "MIT"
+repository = "https://github.com/jackrr/eymo"
 
 [dependencies]
-ab_glyph = "0.2.29"
+eymo-img = { path = "../eymo-img" }
 anyhow = "1.0.98"
 bytemuck = "1.23.1"
 clap = { version = "4.5.38", features = ["derive"] }
 image = "0.25.6"
-lalrpop-util = { version = "0.21.0", features = ["lexer", "unicode"] }
-ndarray = { version = "0.16.1" }
 nokhwa = { version = "0.10.7", features = ["input-native", "input-jscam"] }
-num_cpus = "1.16.0"
-ort = { version = "=2.0.0-rc.9", features = ["ndarray", "xnnpack"] }
-pollster = "0.4.0"
-robust = "1.2.0"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
-wgpu = "25.0.2"
-
-[build-dependencies]
-lalrpop = "0.22.2"
+pollster = "0.4.0"

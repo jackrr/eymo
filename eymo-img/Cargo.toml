@@ -1,0 +1,29 @@
+[package]
+name = "eymo-img"
+authors = ["Jack Ratner"]
+description = "Core logic for detecting faces on images and video streams"
+version = "0.0.0"
+edition = "2024"
+features = [ "test" ]
+license = "MIT"
+repository = "https://github.com/jackrr/eymo"
+
+[dependencies]
+anyhow = "1.0.98"
+bytemuck = { version = "1.23.1", features = ["derive"] }
+futures = "0.3.31"
+image = "0.25.6"
+lalrpop-util = { version = "0.21.0", features = ["lexer", "unicode"] }
+pollster = "0.4.0"
+robust = "1.2.0"
+tracing = "0.1.41"
+tract-onnx = "0.21.13"
+web-sys = { version = "0.3.77", features = ["HtmlCanvasElement"] }
+web-time = "1.1.0"
+wgpu = "24.0.5"
+
+[build-dependencies]
+lalrpop = "0.22.2"
+
+[lib]
+crate-type = ["cdylib", "rlib"]

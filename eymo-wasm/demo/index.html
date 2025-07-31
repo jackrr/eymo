@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+	<head>
+		<title>Eymo WASM Demo</title>
+	</head>
+	<body style="background-color: #000">
+		<h1 style="color: #fff">Eymo WASM Demo</h1>
+		<canvas id="canvas" width="640" height="480"></canvas>
+		<script type="module">
+			console.log('Loading wasm...');
+			import init, { State } from './pkg/eymo_wasm.js';
+
+			async function run() {
+				console.log("Initializing wasm...");
+				await init();
+
+				console.log("Initializing 'state'...");
+				let thing = await new State();
+
+				console.log("Starting the whole thingy...")
+				thing.start();
+				console.log("After start!")
+			}
+
+			run();
+		</script>
+	</body>
+</html>

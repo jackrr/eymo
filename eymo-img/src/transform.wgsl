@@ -19,22 +19,22 @@ fn hsv_to_rgb(hsv: vec3f) -> vec3f {
 	let offset = u32(i % 6);
 
 	switch offset {
-			case 0, default {
+			case 0u, default {
 				return vec3f(v, t, p);
 			}
-			case 1: {
+			case 1u: {
 				return vec3f(q, v, p);
 			}
-			case 2: {
+			case 2u: {
 				return vec3f(p, v, t);
 			}
-			case 3: {
+			case 3u: {
 				return vec3f(p, q, v);
 			}
-			case 4: {
+			case 4u: {
 				return vec3f(t, p, v);
 			}
-			case 5: {
+			case 5u: {
 				return vec3f(v, p, q);
 			}
 	 }

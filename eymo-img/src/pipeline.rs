@@ -4,7 +4,7 @@ use crate::shapes::rect::Rect;
 use crate::{imggpu::gpu::GpuExecutor, shapes::polygon::Polygon};
 use detection::FaceDetector;
 use landmarks::FaceLandmarker;
-use tracing::{span, trace, Level};
+use tracing::{info, span, trace, Level};
 
 mod detection;
 mod landmarks;
@@ -31,23 +31,24 @@ pub struct Face {
 pub type Detection = Vec<Face>;
 
 impl Pipeline {
-    pub fn new(max_threads: usize) -> Result<Pipeline> {
+    pub fn new() -> Result<Pipeline> {
         Ok(Pipeline {
-            face_detector: FaceDetector::new(max_threads / 2)?,
-            face_landmarker: FaceLandmarker::new(max_threads / 2)?,
+            face_detector: FaceDetector::new()?,
+            face_landmarker: FaceLandmarker::new()?,
         })
     }
 
-    pub fn run_gpu(&mut self, tex: &wgpu::Texture, gpu: &mut GpuExecutor) -> Result<Detection> {
+    pub async fn run_gpu(&mut self, tex: &wgpu::Texture, gpu: &mut GpuExecutor) -> Result<Detection> {
         let span = span!(Level::DEBUG, "pipeline");
         let _guard = span.enter();
 
-        let face_bounds = self.face_detector.run_gpu(tex, gpu)?;
+        info!("Starting face detector..");
+        let face_bounds = self.face_detector.run_gpu(tex, gpu).await?;
         let mut faces = Vec::new();
         for face_bound in face_bounds {
             trace!("Face bound: {face_bound:?}");
 
-            let face = self.face_landmarker.run_gpu(&face_bound, tex, gpu)?;
+            let face = self.face_landmarker.run_gpu(&face_bound, tex, gpu).await?;
             trace!("Face features: {face:?}");
 
             faces.push(face);

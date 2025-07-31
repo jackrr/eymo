@@ -1,4 +1,4 @@
-use super::model::{initialize_model, Session};
+use super::model::{initialize_model, Model};
 use crate::imggpu;
 use crate::imggpu::gpu::GpuExecutor;
 use crate::imggpu::vertex::Vertex;
@@ -6,8 +6,8 @@ use crate::shapes::point::PointF32;
 use crate::shapes::rect::{Rect, RectF32};
 use anchors::gen_anchors;
 use anyhow::Result;
-use ort::session::SessionOutputs;
-use tracing::{span, trace, Level};
+use tracing::{info, span, trace, Level};
+use tract_onnx::prelude::tvec;
 use wgpu::util::DeviceExt;
 
 mod anchors;
@@ -16,7 +16,7 @@ const WIDTH: u32 = 128;
 const HEIGHT: u32 = 128;
 
 pub struct FaceDetector {
-    model: Session,
+    model: Model,
     anchors: [RectF32; 896],
 }
 
@@ -45,8 +45,7 @@ impl Face {
     }
 }
 
-const MODEL: &[u8; 418490] =
-    include_bytes!("../../models/mediapipe_face_detection_short_range.onnx");
+const MODEL: &[u8; 418490] = include_bytes!("./mediapipe_face_detection_short_range.onnx");
 
 impl FaceDetector {
     /*
@@ -68,14 +67,14 @@ impl FaceDetector {
     // scale gets interpolated
 
      */
-    pub fn new(threads: usize) -> Result<FaceDetector> {
+    pub fn new() -> Result<FaceDetector> {
         Ok(FaceDetector {
-            model: initialize_model(MODEL, threads)?,
+            model: initialize_model(MODEL)?,
             anchors: gen_anchors(),
         })
     }
 
-    pub fn run_gpu(&mut self, tex: &wgpu::Texture, gpu: &mut GpuExecutor) -> Result<Vec<Face>> {
+    pub async fn run_gpu(&mut self, tex: &wgpu::Texture, gpu: &mut GpuExecutor) -> Result<Vec<Face>> {
         let span = span!(Level::DEBUG, "face_detector");
         let _guard = span.enter();
 
@@ -208,26 +207,21 @@ impl FaceDetector {
         drop(render_pass);
 
         gpu.queue.submit(std::iter::once(encoder.finish()));
+        info!("Completed render pass in detection step!");
 
         let tensor = imggpu::rgb::texture_to_tensor(
             gpu,
             &resize_output_tex,
             imggpu::rgb::OutputRange::NegOneToOne,
-        )?;
-        let outputs = self.model.run(ort::inputs!["input" => tensor]?)?;
-        self.extract_results(outputs, tex.width(), tex.height(), WIDTH, HEIGHT)
-    }
+        )
+        .await?;
+        let outputs = self.model.run(tvec!(tensor.into()))?;
 
-    fn extract_results(
-        &self,
-        outputs: SessionOutputs,
-        input_width: u32,
-        input_height: u32,
-        resized_width: u32,
-        resized_height: u32,
-    ) -> Result<Vec<Face>> {
-        let regressors = outputs["regressors"].try_extract_tensor::<f32>()?;
-        let classificators = outputs["classificators"].try_extract_tensor::<f32>()?;
+        let x_scale = tex.width() as f32 / WIDTH as f32;
+        let y_scale = tex.height() as f32 / HEIGHT as f32;
+
+        let regressors = outputs[0].to_array_view::<f32>()?;
+        let classificators = outputs[1].to_array_view::<f32>()?;
 
         let scores = classificators.as_slice().unwrap();
 
@@ -238,9 +232,6 @@ impl FaceDetector {
         for res in detections.rows() {
             let score = sigmoid_stable(scores[row_idx]);
             if score > 0.5 {
-                let x_scale = input_width as f32 / resized_width as f32;
-                let y_scale = input_height as f32 / resized_height as f32;
-
                 let mut anchor = self.anchors[row_idx].clone();
                 let ax = anchor.x.clone();
                 let ay = anchor.y.clone();

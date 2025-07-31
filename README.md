@@ -16,7 +16,7 @@ usage instructions.
 
 By default, eymo will stream output to a child `ffplay` process for
 display in a window. To stream output to a virtual webcam device see
-operating system installation requirements...
+OS-specific installation requirements as follows:
 
 #### Linux (*optional*)
 

@@ -1,8 +1,12 @@
 [package]
 name = "eymo-img"
-version = "0.1.0"
+authors = ["Jack Ratner"]
+description = "Core logic for detecting faces on images and video streams"
+version = "0.0.0"
 edition = "2024"
 features = [ "test" ]
+license = "MIT"
+repository = "https://github.com/jackrr/eymo"
 
 [dependencies]
 anyhow = "1.0.98"

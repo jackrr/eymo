@@ -1,8 +1,12 @@
 [package]
 name = "eymo-desktop"
-version = "0.1.0"
+authors = ["Jack Ratner"]
+description = "Desktop application for manipulating faces on an image or video stream"
+version = "0.0.0"
 edition = "2024"
 features = [ "test" ]
+license = "MIT"
+repository = "https://github.com/jackrr/eymo"
 
 [dependencies]
 eymo-img = { path = "../eymo-img" }

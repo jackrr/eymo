@@ -1,8 +1,12 @@
 [package]
 name = "eymo-wasm"
-version = "0.1.0"
+authors = ["Jack Ratner"]
+description = "WASM bundle for manipulating faces on a webcam stream"
+version = "0.0.0"
 edition = "2024"
 features = [ "test" ]
+license = "MIT"
+repository = "https://github.com/jackrr/eymo"
 
 [features]
 debug = ["console_error_panic_hook"]

@@ -109,5 +109,3 @@ channels(1.5, 0.5, 0.8) // increase/decrease rgb levels by given factors (in thi
 - [nokwha](https://github.com/l1npengtul/nokhwa) cross-platform webcam streaming
 - [tract](http://github.com/sonos/tract) model inference execution runtime
 - [wgpu](https://github.com/gfx-rs/wgpu) cross-platform GPU execution of image manipulations
-
-## License - TODO

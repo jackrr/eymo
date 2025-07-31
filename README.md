@@ -117,9 +117,14 @@ channels(1.5, 0.5, 0.8) // increase/decrease rgb levels by given factors (in thi
 
 ## Built with...
 
+- [delaunator](https://github.com/mapbox/delaunator) reimplimented in rust within this project
 - [ffmpeg](https://ffmpeg.org/) output video streaming
 - [lalrpop](https://github.com/lalrpop/lalrpop) language parser
 - [mediapipe](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker) face detection and landmarker models
 - [nokwha](https://github.com/l1npengtul/nokhwa) cross-platform webcam streaming
+- [robust](https://github.com/georust/robust) helpers for graphics processing
 - [tract](http://github.com/sonos/tract) model inference execution runtime
+- [wasm-bindgen](https://github.com/wasm-bindgen/wasm-bindgen)
+- [wasm-pack](https://drager.github.io/wasm-pack/installer/)
 - [wgpu](https://github.com/gfx-rs/wgpu) cross-platform GPU execution of image manipulations
+

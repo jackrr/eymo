@@ -22,7 +22,7 @@ pub struct Transform {
     scale: f32,
     tile: bool,
     rps: Option<f32>,
-    last_tick: Option<Instant>,
+    last_tick: Instant,
     drift_vec: Option<(f32, f32)>,
     brightness_mod: f32,
     saturation_mod: f32,
@@ -93,7 +93,7 @@ impl Transform {
             brightness_mod: -1.,
             saturation_mod: -1.,
             chans_mod: [-1., -1., -1., -1.],
-            last_tick: None,
+            last_tick: Instant::now(),
             rotate_deg: None,
             rps: None,
             translation: None,
@@ -169,8 +169,6 @@ impl Transform {
             self.cache.insert(op.id.clone(), next_cache_val);
         }
 
-        self.last_tick = Some(Instant::now());
-
         let sampler = self.sampler(gpu);
         self.gpu_gunk.execute(
             gpu,
@@ -185,70 +183,70 @@ impl Transform {
     fn tick(&self, shape: &Shape, tex: &wgpu::Texture, prev: Option<ShapeOpState>) -> ShapeOpState {
         // animate spin and drift since last iteration
         let mut next_state = ShapeOpState::default();
+        let last = self.last_tick;
 
-        match self.last_tick {
-            Some(last) => {
-                let defaults = (
-                    self.rotate_deg.unwrap_or(0.),
-                    self.drift_vec.unwrap_or((0., 0.)),
-                    self.translation.unwrap_or((0, 0)),
-                );
-                let (rotate_deg, (vel, ang), (tx, ty)) = match prev {
-                    Some(prev) => (
-                        prev.rotate_deg.unwrap_or(defaults.0),
-                        prev.drift_vec.unwrap_or(defaults.1),
-                        prev.translation.unwrap_or(defaults.2),
-                    ),
-                    None => defaults,
-                };
+        let defaults = (
+            self.rotate_deg.unwrap_or(0.),
+            self.drift_vec.unwrap_or((0., 0.)),
+            self.translation.unwrap_or((0, 0)),
+        );
 
-                if self.rps.is_some() {
-                    let rps = self.rps.unwrap();
-                    next_state.rotate_deg =
-                        Some(rotate_deg + 360. * rps * last.elapsed().as_secs_f32());
-                }
+        let (rotate_deg, (vel, ang), (tx, ty)) = match prev {
+            Some(prev) => (
+                prev.rotate_deg.unwrap_or(defaults.0),
+                prev.drift_vec.unwrap_or(defaults.1),
+                prev.translation.unwrap_or(defaults.2),
+            ),
+            None => defaults,
+        };
 
-                if self.drift_vec.is_some() {
-                    let hyp = vel * last.elapsed().as_secs_f32();
-                    let dy = (ang.to_radians().cos() * hyp).round() as i32;
-                    let dx = (ang.to_radians().sin() * hyp).round() as i32;
+        if self.rps.is_some() {
+            let rps = self.rps.unwrap();
+            next_state.rotate_deg = Some(rotate_deg + 360. * rps * last.elapsed().as_secs_f32());
+        } else if self.rotate_deg.is_some() {
+            next_state.rotate_deg = self.rotate_deg.clone();
+        }
 
-                    let center = shape.center();
-                    let center_x = center.x as i32;
-                    let center_y = center.y as i32;
+        if self.drift_vec.is_some() {
+            let hyp = vel * last.elapsed().as_secs_f32();
+            let dy = (ang.to_radians().cos() * hyp).round() as i32;
+            let dx = (ang.to_radians().sin() * hyp).round() as i32;
 
-                    let mut next_x = center_x + tx + dx;
-                    let mut next_y = center_y + ty + dy;
+            let center = shape.center();
+            let center_x = center.x as i32;
+            let center_y = center.y as i32;
 
-                    let mut next_ang = ang;
-                    let width = tex.width() as i32;
-                    let height = tex.height() as i32;
+            let mut next_x = center_x + tx + dx;
+            let mut next_y = center_y + ty + dy;
 
-                    if next_x >= width {
-                        next_x = width - (next_x - width);
-                        next_ang = mirror_x(next_ang);
-                    }
+            let mut next_ang = ang;
+            let width = tex.width() as i32;
+            let height = tex.height() as i32;
 
-                    if next_x < 0 {
-                        next_x *= -1;
-                        next_ang = mirror_x(next_ang);
-                    }
-
-                    if next_y >= height {
-                        next_y = height - (next_y - height);
-                        next_ang = mirror_y(next_ang);
-                    }
-
-                    if next_y < 0 {
-                        next_y *= -1;
-                        next_ang = mirror_y(next_ang);
-                    }
-
-                    next_state.drift_vec = Some((vel, next_ang));
-                    next_state.translation = Some((next_x - center_x, next_y - center_y));
-                }
+            if next_x >= width {
+                next_x = width - (next_x - width);
+                next_ang = mirror_x(next_ang);
             }
-            None => (),
+
+            if next_x < 0 {
+                next_x *= -1;
+                next_ang = mirror_x(next_ang);
+            }
+
+            if next_y >= height {
+                next_y = height - (next_y - height);
+                next_ang = mirror_y(next_ang);
+            }
+
+            if next_y < 0 {
+                next_y *= -1;
+                next_ang = mirror_y(next_ang);
+            }
+
+            next_state.drift_vec = Some((vel, next_ang));
+            next_state.translation = Some((next_x - center_x, next_y - center_y));
+        } else if self.translation.is_some() {
+            next_state.translation = self.translation.clone();
         }
 
         next_state

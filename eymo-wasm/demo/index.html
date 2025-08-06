@@ -15,11 +15,17 @@
 				await init();
 
 				console.log("Initializing 'state'...");
-				let thing = await new State();
+				let thing = await new State("mouth: swap_with(leye)");
 
 				console.log("Starting the whole thingy...")
 				thing.start();
+
 				console.log("After start!")
+
+				setTimeout(() => {
+					console.log("Calling set_cmd")
+					thing.set_cmd("leye: scale(5)")
+				}, 7000)
 			}
 
 			run();

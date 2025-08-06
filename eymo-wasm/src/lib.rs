@@ -11,9 +11,15 @@ use tracing::{warn, debug, error, info};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::*;
+// TODO: try using std::sync::Mutex
+use tokio::sync::Mutex;
 
 #[wasm_bindgen]
 pub struct State {
+    inner_state: Mutex<InnerState>
+}
+
+struct InnerState {
     interpreter: lang::Interpreter,
     gpu: GpuExecutor,
     pipeline: Pipeline,
@@ -30,84 +36,10 @@ fn main() -> Result<(), JsValue> {
     Ok(())
 }
 
-#[wasm_bindgen]
-impl State {
-    async fn new_anyhow() -> anyhow::Result<Self> {
-        // TODO: better error handling
-        debug!("Loading gpu executor...");
-        let browser_window = wgpu::web_sys::window().unwrap_throw();
-        let document = browser_window.document().unwrap_throw();
-        let canvas = document.get_element_by_id("canvas").unwrap_throw();
-        let html_canvas_element = canvas.unchecked_into();
-        let (mut gpu, surface, config) = GpuExecutor::new_wasm(html_canvas_element).await?;
+// TODO: add a function to register a target dom element to display video
+// TODO: add a function to stop video
 
-        // TODO: detect canvas resize and call configure
-        // NOTE: to resize canvas, just call configure again with updated width + height on config
-        surface.configure(&gpu.device, &config);
-
-        // TODO: don't hardcode command
-        debug!("Loading image transformer...");
-        let command = "mouth: swap_with(leye_region), scale(2)\n";
-        let interpreter = lang::parse(command, &mut gpu)?;
-
-        debug!("Loading detection pipeline...");
-        let pipeline = Pipeline::new()?;
-
-        debug!("State init complete!");
-        Ok(Self {
-            interpreter,
-            gpu,
-            pipeline,
-            surface,
-            config,
-        })
-    }
-
-    #[wasm_bindgen(constructor)]
-    pub async fn new() -> Result<Self, JsValue> {
-        debug!("Constructor for State...");
-        wrap_err(Self::new_anyhow().await)
-    }
-
-    #[wasm_bindgen]
-    pub async fn start(&mut self) -> Result<(), JsValue> {
-        debug!("Loading camera...");
-        let browser_window = wgpu::web_sys::window().unwrap_throw();
-        let devices = browser_window.navigator().media_devices().unwrap_throw();
-        let constraints = MediaStreamConstraints::new();
-        constraints.set_video(&js_sys::Boolean::from(true));
-        let stream = JsFuture::from(devices.get_user_media_with_constraints(&constraints).unwrap_throw()).await.unwrap().unchecked_into::<MediaStream>();
-        let vid = stream.get_video_tracks().get(0).unchecked_into::<MediaStreamTrack>();
-        let proc = MediaStreamTrackProcessor::new(&MediaStreamTrackProcessorInit::new(&vid))?;
-        let reader = proc.readable().get_reader().unchecked_into::<ReadableStreamDefaultReader>();
-
-        loop {
-            match JsFuture::from(reader.read()).await {
-                Ok(js_frame) => {
-                    let video_frame =
-                        js_sys::Reflect::get(&js_frame, &js_sys::JsString::from("value"))
-                            .unwrap()
-                            .unchecked_into::<VideoFrame>();
-                    info!("{}x{}", video_frame.coded_width(), video_frame.coded_height());
-                    let img = img::from_frame(&video_frame).await?;
-                    match self.process_frame(img).await {
-                        Ok(_) => {}
-                        Err(e) => {
-                            error!("Failed to process frame: {}", e.to_string());
-                        }
-                    }
-                    video_frame.close();
-                },
-                Err(e) => {
-                    error!("Failed to read frame: {e:?}");
-                }
-            }
-            
-        }
-
-        Ok(())
-    }
-
+impl InnerState {
     async fn process_frame(&mut self, input_image: image::RgbaImage) -> anyhow::Result<()> {
         let input = self.gpu.rgba_buffer_to_texture(
             input_image.as_raw(),
@@ -118,9 +50,7 @@ impl State {
         let detection = self.pipeline.run_gpu(&input, &mut self.gpu).await?;
 
         debug!("Running transforms..");
-        let result = self
-            .interpreter
-            .execute(&detection, input, &mut self.gpu, |_| Ok(()));
+        let result = self.interpreter.execute(&detection, input, &mut self.gpu, |_| Ok(()));
 
         debug!("Copying result to 'surface'...");
         let output = self.surface.get_current_texture()?;
@@ -158,9 +88,98 @@ impl State {
         Ok(())
     }
 
-    // TODO: add a function to specify transforms string
-    // TODO: add a function to register a target dom element to display video
-    // TODO: add a function to stop video
+}
+
+#[wasm_bindgen]
+impl State {
+    async fn new_anyhow(cmd: &str) -> anyhow::Result<Self> {
+        // TODO: better error handling
+        debug!("Loading gpu executor...");
+        let browser_window = wgpu::web_sys::window().unwrap_throw();
+        let document = browser_window.document().unwrap_throw();
+        let canvas = document.get_element_by_id("canvas").unwrap_throw();
+        let html_canvas_element = canvas.unchecked_into();
+        let (mut gpu, surface, config) = GpuExecutor::new_wasm(html_canvas_element).await?;
+
+        // TODO: detect canvas resize and call configure
+        // NOTE: to resize canvas, just call configure again with updated width + height on config
+        surface.configure(&gpu.device, &config);
+
+        debug!("Loading image transformer...");
+        let interpreter = lang::parse(cmd, &mut gpu)?;
+
+        debug!("Loading detection pipeline...");
+        let pipeline = Pipeline::new()?;
+
+        debug!("State init complete!");
+        Ok(Self {
+            inner_state: Mutex::new(InnerState {
+                interpreter,
+                gpu,
+                pipeline,
+                surface,
+                config,
+            })
+        })
+    }
+
+    #[wasm_bindgen(constructor)]
+    pub async fn new(cmd: &str) -> Result<Self, JsValue> {
+        debug!("Constructor for State...");
+        wrap_err(Self::new_anyhow(cmd).await)
+    }
+
+    #[wasm_bindgen]
+    pub async fn set_cmd(&self, cmd: &str) -> Result<(), JsValue> {
+        debug!("Setting command to {cmd}");
+
+        let mut s = self.inner_state.lock().await;
+        let next_interpreter = wrap_err(lang::parse(cmd, &mut s.gpu))?;
+        s.interpreter = next_interpreter;
+        Ok(())
+    }
+
+
+    #[wasm_bindgen]
+    pub async fn start(&self) -> Result<(), JsValue> {
+        debug!("Loading camera...");
+        let browser_window = wgpu::web_sys::window().unwrap_throw();
+        let devices = browser_window.navigator().media_devices().unwrap_throw();
+        let constraints = MediaStreamConstraints::new();
+        constraints.set_video(&js_sys::Boolean::from(true));
+        let stream = JsFuture::from(devices.get_user_media_with_constraints(&constraints).unwrap_throw()).await.unwrap().unchecked_into::<MediaStream>();
+        let vid = stream.get_video_tracks().get(0).unchecked_into::<MediaStreamTrack>();
+        let proc = MediaStreamTrackProcessor::new(&MediaStreamTrackProcessorInit::new(&vid))?;
+        let reader = proc.readable().get_reader().unchecked_into::<ReadableStreamDefaultReader>();
+
+        loop {
+            match JsFuture::from(reader.read()).await {
+                Ok(js_frame) => {
+                    let video_frame =
+                        js_sys::Reflect::get(&js_frame, &js_sys::JsString::from("value"))
+                            .unwrap()
+                            .unchecked_into::<VideoFrame>();
+                    info!("{}x{}", video_frame.coded_width(), video_frame.coded_height());
+                    let img = img::from_frame(&video_frame).await?;
+                    let mut is = self.inner_state.lock().await;
+                    match is.process_frame(img).await {
+                        Ok(_) => {}
+                        Err(e) => {
+                            error!("Failed to process frame: {}", e.to_string());
+                        }
+                    }
+                    drop(is);
+                    video_frame.close();
+                },
+                Err(e) => {
+                    error!("Failed to read frame: {e:?}");
+                }
+            }
+            
+        }
+
+        Ok(())
+    }
 }
 
 fn wrap_err<T>(r: anyhow::Result<T>) -> Result<T, JsValue> {

@@ -12,7 +12,8 @@ pub mod ast;
 lalrpop_mod!(pub parser, "/lang/grammar.rs");
 
 pub fn parse(input: &str, gpu: &mut GpuExecutor) -> Result<Interpreter> {
-    match parser::StatementsParser::new().parse(input) {
+    // HACK: append newline for parser happiness
+    match parser::StatementsParser::new().parse(&(input.to_owned() + "\n")) {
         Ok(res) => Ok(Interpreter::new(res, gpu)),
         Err(e) => Err(Error::msg(format!("{e:?}"))),
     }

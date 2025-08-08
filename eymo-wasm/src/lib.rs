@@ -1,18 +1,15 @@
-// What follows liberally draws from:
-// https://sotrh.github.io/learn-wgpu/beginner/tutorial1-window/#the-code
-
 mod img;
 mod util;
 
 use eymo_img::imggpu::gpu::GpuExecutor;
 use eymo_img::lang;
-use eymo_img::pipeline::Pipeline;
+use eymo_img::pipeline::{Detection, Pipeline};
 use tracing::{warn, debug, error, info};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::*;
-// TODO: try using std::sync::Mutex
 use tokio::sync::Mutex;
+use tokio::sync::oneshot;
 
 #[wasm_bindgen]
 pub struct State {
@@ -23,20 +20,22 @@ struct InnerState {
     interpreter: lang::Interpreter,
     gpu: GpuExecutor,
     pipeline: Pipeline,
-    // canvas: web_sys::HtmlCanvasElement,
+    canvas: web_sys::HtmlCanvasElement,
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
+    detection_cache: Option<Detection>,
+    stop_tx: Option<oneshot::Sender<()>>,
+    stop_rx: oneshot::Receiver<()>,
 }
 
 #[wasm_bindgen(start)]
 fn main() -> Result<(), JsValue> {
-    tracing_wasm::set_as_global_default_with_config(tracing_wasm::WASMLayerConfigBuilder::default().set_max_level(tracing::Level::INFO).build());
+    tracing_wasm::set_as_global_default_with_config(tracing_wasm::WASMLayerConfigBuilder::default().set_max_level(tracing::Level::WARN).build());
     debug!("Loaded! Setting panic hook...");
     util::set_panic_hook();
     Ok(())
 }
 
-// TODO: add a function to register a target dom element to display video
 // TODO: add a function to stop video
 
 impl InnerState {
@@ -46,11 +45,23 @@ impl InnerState {
             input_image.width(),
             input_image.height(),
         );
-        debug!("Running detection..");
-        let detection = self.pipeline.run_gpu(&input, &mut self.gpu).await?;
 
+        let mut replace_detection = false;
+
+        let detection = match self.detection_cache.take() {
+            Some(detection) => detection,
+            None => {
+                debug!("Running detection..");
+                replace_detection = true;
+                self.pipeline.run_gpu(&input, &mut self.gpu).await?
+            }
+        };
+        
         debug!("Running transforms..");
         let result = self.interpreter.execute(&detection, input, &mut self.gpu, |_| Ok(()));
+        if replace_detection {
+            self.detection_cache.replace(detection);
+        }
 
         debug!("Copying result to 'surface'...");
         let output = self.surface.get_current_texture()?;
@@ -92,14 +103,17 @@ impl InnerState {
 
 #[wasm_bindgen]
 impl State {
-    async fn new_anyhow(cmd: &str) -> anyhow::Result<Self> {
+    async fn new_anyhow(canvas_id: &str, cmd: &str) -> anyhow::Result<Self> {
         // TODO: better error handling
         debug!("Loading gpu executor...");
         let browser_window = wgpu::web_sys::window().unwrap_throw();
         let document = browser_window.document().unwrap_throw();
-        let canvas = document.get_element_by_id("canvas").unwrap_throw();
-        let html_canvas_element = canvas.unchecked_into();
-        let (mut gpu, surface, config) = GpuExecutor::new_wasm(html_canvas_element).await?;
+        let canvas = document.get_element_by_id(canvas_id).unwrap_throw();
+        let canvas: web_sys::HtmlCanvasElement = canvas
+            .dyn_into::<web_sys::HtmlCanvasElement>()
+            .map_err(|_| ())
+            .unwrap();
+        let (mut gpu, surface, config) = GpuExecutor::new_wasm(canvas.clone()).await?;
 
         // TODO: detect canvas resize and call configure
         // NOTE: to resize canvas, just call configure again with updated width + height on config
@@ -112,6 +126,9 @@ impl State {
         let pipeline = Pipeline::new()?;
 
         debug!("State init complete!");
+
+        let (stop_tx, stop_rx) = oneshot::channel();
+
         Ok(Self {
             inner_state: Mutex::new(InnerState {
                 interpreter,
@@ -119,14 +136,18 @@ impl State {
                 pipeline,
                 surface,
                 config,
+                canvas,
+                detection_cache: None,
+                stop_tx: Some(stop_tx),
+                stop_rx,
             })
         })
     }
 
     #[wasm_bindgen(constructor)]
-    pub async fn new(cmd: &str) -> Result<Self, JsValue> {
+    pub async fn new(canvas_id: &str, cmd: &str) -> Result<Self, JsValue> {
         debug!("Constructor for State...");
-        wrap_err(Self::new_anyhow(cmd).await)
+        wrap_err(Self::new_anyhow(canvas_id, cmd).await)
     }
 
     #[wasm_bindgen]
@@ -139,6 +160,14 @@ impl State {
         Ok(())
     }
 
+    #[wasm_bindgen]
+    pub async fn stop(&self) -> Result<(), JsValue> {
+        let mut is = self.inner_state.lock().await;
+        let stop_tx = is.stop_tx.take();
+        stop_tx.unwrap().send(()).unwrap_throw();
+        
+        Ok(())
+    }
 
     #[wasm_bindgen]
     pub async fn start(&self) -> Result<(), JsValue> {
@@ -152,7 +181,14 @@ impl State {
         let proc = MediaStreamTrackProcessor::new(&MediaStreamTrackProcessorInit::new(&vid))?;
         let reader = proc.readable().get_reader().unchecked_into::<ReadableStreamDefaultReader>();
 
-        loop {
+        // Re-init termination channel
+        let mut is = self.inner_state.lock().await;
+        let (stop_tx, stop_rx) = oneshot::channel();
+        is.stop_tx = Some(stop_tx);
+        is.stop_rx = stop_rx;
+        drop(is);
+
+        'frame_loop: loop {
             match JsFuture::from(reader.read()).await {
                 Ok(js_frame) => {
                     let video_frame =
@@ -161,7 +197,14 @@ impl State {
                             .unchecked_into::<VideoFrame>();
                     info!("{}x{}", video_frame.coded_width(), video_frame.coded_height());
                     let img = img::from_frame(&video_frame).await?;
+
                     let mut is = self.inner_state.lock().await;
+                    if !is.stop_rx.is_empty() {
+                        // terminate message sent
+                        video_frame.close();
+                        break 'frame_loop;
+                    }
+
                     match is.process_frame(img).await {
                         Ok(_) => {}
                         Err(e) => {

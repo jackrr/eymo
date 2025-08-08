@@ -56,7 +56,7 @@ impl FaceDetector {
     Model Input: 128x128 f32 image
     Model Output:
     - 896 length array of confidence scores (classificators)
-      - 896 length 2D array of detection coords (regressors)
+    - 896 length 2D array of detection coords (regressors)
 
     The first 4 values in the detection coords are centroid, width,
     height offsets applied to a particular cell among 2 predetermined

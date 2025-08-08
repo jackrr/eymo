@@ -6,6 +6,10 @@
 	<body style="background-color: #000">
 		<h1 style="color: #fff">Eymo WASM Demo</h1>
 		<canvas id="canvas" width="640" height="480"></canvas>
+		<input type="textarea" id="cmd" value="face: swap_with(face+1), scale(3.5)"/>
+		<button id="submit">Submit</button>
+		<button id="play">Play</button>
+		<button id="stop">Stop</button>
 		<script type="module">
 			console.log('Loading wasm...');
 			import init, { State } from './pkg/eymo_wasm.js';
@@ -14,18 +18,28 @@
 				console.log("Initializing wasm...");
 				await init();
 
-				console.log("Initializing 'state'...");
-				let thing = await new State("mouth: swap_with(leye)");
+				let textArea = document.getElementById("cmd");
+				console.log("Initializing 'state' with cmd", textArea.value);
+				
+				let thing = await new State("canvas", textArea.value);
 
-				console.log("Starting the whole thingy...")
-				thing.start();
+				let submit = document.getElementById("submit");
+				submit.addEventListener('click', async () => {
+					console.log("Updating command to", textArea.value);
+					await thing.set_cmd(textArea.value);
+					console.log("Command updated.");
+				})
 
-				console.log("After start!")
-
-				setTimeout(() => {
-					console.log("Calling set_cmd")
-					thing.set_cmd("leye: scale(5)")
-				}, 7000)
+				let play = document.getElementById("play");
+				play.addEventListener('click', async () => {
+					console.log("starting")
+					await thing.start();
+				})
+				let stop = document.getElementById("stop");
+				stop.addEventListener('click', async () => {
+					console.log("stopping")
+					await thing.stop();
+				})
 			}
 
 			run();

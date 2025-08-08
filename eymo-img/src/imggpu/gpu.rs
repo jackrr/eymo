@@ -1,44 +1,56 @@
+use super::util::padded_bytes_per_row;
+use anyhow::{Error, Result};
+use image::{DynamicImage, RgbaImage};
 #[cfg(not(target_arch = "wasm32"))]
 use pollster::FutureExt;
-use anyhow::{Error, Result};
-use tracing::{span, Level};
-use image::{DynamicImage, RgbaImage};
-use wgpu::ShaderModuleDescriptor;
 use std::collections::HashMap;
-use super::util::padded_bytes_per_row;
+use tracing::{Level, span};
+use wgpu::ShaderModuleDescriptor;
 #[cfg(target_arch = "wasm32")]
 use wgpu::{Surface, SurfaceConfiguration};
 
 pub struct GpuExecutor {
     pub queue: wgpu::Queue,
     pub device: wgpu::Device,
-    shaders: HashMap<String, wgpu::ShaderModule>
+    shaders: HashMap<String, wgpu::ShaderModule>,
 }
 
 impl GpuExecutor {
     #[cfg(not(target_arch = "wasm32"))]
     async fn init() -> Result<Self> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-			      backends: wgpu::Backends::all(),
-			      flags: wgpu::InstanceFlags::VALIDATION,
-			      backend_options: wgpu::BackendOptions::default()
-		    });
+            backends: wgpu::Backends::all(),
+            flags: wgpu::InstanceFlags::VALIDATION,
+            backend_options: wgpu::BackendOptions::default(),
+        });
 
-        let adapter = match instance.request_adapter(&wgpu::RequestAdapterOptions::default()).await {
+        let adapter = match instance
+            .request_adapter(&wgpu::RequestAdapterOptions::default())
+            .await
+        {
             Some(adapter) => adapter,
             None => {
                 return Err(Error::msg("Failed to find an appropriate wgpu adapter"));
-            },
+            }
         };
 
-        let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
-			      required_features: wgpu::Features::empty(),
-			      required_limits: wgpu::Limits::default(),
-			      memory_hints: wgpu::MemoryHints::Performance,
-			      label: Some("device"),
-		    }, None).await?;
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    required_features: wgpu::Features::empty(),
+                    required_limits: wgpu::Limits::default(),
+                    memory_hints: wgpu::MemoryHints::Performance,
+                    label: Some("device"),
+                },
+                None,
+            )
+            .await?;
 
-        Ok(Self { device, queue, shaders: HashMap::new() })
+        Ok(Self {
+            device,
+            queue,
+            shaders: HashMap::new(),
+        })
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -49,35 +61,46 @@ impl GpuExecutor {
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub async fn new_wasm(canvas: web_sys::HtmlCanvasElement) -> Result<(Self, Surface<'static>, SurfaceConfiguration)> {
+    pub async fn new_wasm(
+        canvas: web_sys::HtmlCanvasElement,
+    ) -> Result<(Self, Surface<'static>, SurfaceConfiguration)> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-			      backends: wgpu::Backends::BROWSER_WEBGPU,
-			      flags: wgpu::InstanceFlags::VALIDATION,
-			      backend_options: wgpu::BackendOptions::default()
-		    });
+            backends: wgpu::Backends::BROWSER_WEBGPU,
+            flags: wgpu::InstanceFlags::VALIDATION,
+            backend_options: wgpu::BackendOptions::default(),
+        });
 
         let width = canvas.width();
         let height = canvas.height();
 
         let surface = instance.create_surface(wgpu::SurfaceTarget::Canvas(canvas))?;
 
-        let adapter = match instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::default(),
-            compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
-        }).await {
+        let adapter = match instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::default(),
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: false,
+            })
+            .await
+        {
             Some(adapter) => adapter,
             None => {
                 return Err(Error::msg("Failed to find an appropriate wgpu adapter"));
-            },
+            }
         };
 
-        let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
-			      required_features: wgpu::Features::empty(),
-			      required_limits: wgpu::Limits::default(),
-			      memory_hints: wgpu::MemoryHints::Performance,
-			      label: Some("device"),
-		    }, None).await.expect("Unable to find a suitable GPU adapter!");
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    required_features: wgpu::Features::empty(),
+                    required_limits: wgpu::Limits::default(),
+                    memory_hints: wgpu::MemoryHints::Performance,
+                    label: Some("device"),
+                },
+                None,
+            )
+            .await
+            .expect("Unable to find a suitable GPU adapter!");
 
         let config = wgpu::SurfaceConfiguration {
             format: wgpu::TextureFormat::Rgba8Unorm,
@@ -90,7 +113,15 @@ impl GpuExecutor {
             desired_maximum_frame_latency: 2,
         };
 
-        Ok((Self { device, queue, shaders: HashMap::new() }, surface, config))
+        Ok((
+            Self {
+                device,
+                queue,
+                shaders: HashMap::new(),
+            },
+            surface,
+            config,
+        ))
     }
 
     pub fn load_shader(&mut self, name: &str, desc: ShaderModuleDescriptor) -> wgpu::ShaderModule {
@@ -106,9 +137,8 @@ impl GpuExecutor {
     pub fn snapshot_texture(&self, tex: &wgpu::Texture, fname: &str) -> Result<()> {
         let width = tex.width();
         let height = tex.height();
-        let buffer_size = padded_bytes_per_row(width) as u64
-            * height as u64
-            * std::mem::size_of::<u8>() as u64;
+        let buffer_size =
+            padded_bytes_per_row(width) as u64 * height as u64 * std::mem::size_of::<u8>() as u64;
         let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("snapshot_buffer"),
             size: buffer_size,
@@ -169,13 +199,17 @@ impl GpuExecutor {
         drop(padded_data);
         buffer.unmap();
 
-        let img =
-            RgbaImage::from_raw(width, height, pixels).unwrap();
+        let img = RgbaImage::from_raw(width, height, pixels).unwrap();
         DynamicImage::ImageRgba8(img).to_rgb8().save(fname)?;
         Ok(())
     }
 
-    pub fn rgba_buffer_to_texture(&self, rgba_bytes: &[u8], width: u32, height: u32) -> wgpu::Texture {
+    pub fn rgba_buffer_to_texture(
+        &self,
+        rgba_bytes: &[u8],
+        width: u32,
+        height: u32,
+    ) -> wgpu::Texture {
         let span = span!(Level::DEBUG, "rgba_buffer_to_texture");
         let _guard = span.enter();
 
@@ -185,14 +219,16 @@ impl GpuExecutor {
             depth_or_array_layers: 1,
         };
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
+            label: Some("rgba_sourced_texture"),
             size: texture_size,
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
             view_formats: &[wgpu::TextureFormat::Rgba8Unorm],
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::COPY_SRC,
         });
 
         self.queue.write_texture(
@@ -214,4 +250,3 @@ impl GpuExecutor {
         texture
     }
 }
-

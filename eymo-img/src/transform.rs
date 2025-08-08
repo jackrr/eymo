@@ -3,7 +3,7 @@ use crate::shapes::point::Point;
 use crate::shapes::shape::Shape;
 use crate::{imggpu::gpu::GpuExecutor, shapes::rect::Rect};
 use std::collections::HashMap;
-use tracing::{span, warn, Level};
+use tracing::{Level, span, warn};
 use web_time::Instant;
 use wgpu::util::DeviceExt;
 
@@ -538,7 +538,7 @@ impl GpuGunk {
         });
 
         let output_tex = gpu.device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
+            label: Some("transform output tex"),
             size: wgpu::Extent3d {
                 width: tex.width(),
                 height: tex.height(),

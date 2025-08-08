@@ -40,6 +40,14 @@
 					console.log("stopping")
 					await thing.stop();
 				})
+
+				thing.start();
+
+				setTimeout(() => {
+					console.log("Updating canvas width...")
+					let canvas = document.getElementById("canvas")
+					canvas.width = 1000;
+				}, 10000)
 			}
 
 			run();

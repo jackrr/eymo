@@ -1,6 +1,6 @@
-use super::detection;
-use super::model::{initialize_model, Model};
 use super::Face;
+use super::detection;
+use super::model::{Model, initialize_model};
 use crate::imggpu;
 use crate::imggpu::gpu::GpuExecutor;
 use crate::imggpu::vertex::Vertex;
@@ -8,8 +8,8 @@ use crate::shapes::point::Point;
 use crate::shapes::polygon::Polygon;
 use crate::shapes::rect::Rect;
 use anyhow::Result;
-use tracing::{debug, span, Level};
-use tract_onnx::prelude::tvec;
+use tracing::{Level, debug, span};
+use tract_nnef::prelude::tvec;
 use wgpu::util::DeviceExt;
 
 pub struct FaceLandmarker {
@@ -46,7 +46,7 @@ const NOSE_IDXS: [usize; 23] = [
     419, 351, 417,
 ];
 
-const MODEL: &[u8; 2429047] = include_bytes!("./mediapipe_face_landmark.onnx");
+const MODEL: &[u8; 1435541] = include_bytes!("./face_landmark.tar.gz");
 
 impl FaceLandmarker {
     pub fn new() -> Result<FaceLandmarker> {
@@ -204,12 +204,21 @@ impl FaceLandmarker {
         render_pass.draw(0..vertices.len() as u32, 0..1);
         drop(render_pass);
 
+        let gpu_span = span!(Level::DEBUG, "face_landmarker:gpu_run");
+        let gpu_guard = gpu_span.enter();
         gpu.queue.submit(std::iter::once(encoder.finish()));
+        drop(gpu_guard);
 
         let tensor =
-            imggpu::rgb::texture_to_tensor(gpu, &output_tex, imggpu::rgb::OutputRange::ZeroToOne).await?;
+            imggpu::rgb::texture_to_tensor(gpu, &output_tex, imggpu::rgb::OutputRange::ZeroToOne)
+                .await?;
 
+        // FIXME: this takes ~65ms on WASM!
+        let model_span = span!(Level::DEBUG, "face_landmarker:model_run");
+        let model_guard = model_span.enter();
         let outputs = self.model.run(tvec!(tensor.into()))?;
+        drop(model_guard);
+
         let output = outputs[0].to_array_view::<f32>()?;
         let mesh = output.squeeze().squeeze().squeeze();
         let r = mesh.as_slice().unwrap();

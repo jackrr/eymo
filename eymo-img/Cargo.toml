@@ -17,7 +17,7 @@ lalrpop-util = { version = "0.21.0", features = ["lexer", "unicode"] }
 pollster = "0.4.0"
 robust = "1.2.0"
 tracing = "0.1.41"
-tract-onnx = "0.21.13"
+tract-nnef = "0.21.13"
 web-sys = { version = "0.3.77", features = ["HtmlCanvasElement"] }
 web-time = "1.1.0"
 wgpu = "24.0.5"

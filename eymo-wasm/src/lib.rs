@@ -8,7 +8,7 @@ use eymo_img::pipeline::{Detection, Pipeline};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
-use tracing::{debug, error, info};
+use tracing::{Level, debug, error, info, span};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::*;
@@ -35,7 +35,7 @@ struct InnerState {
 fn main() -> Result<(), JsValue> {
     tracing_wasm::set_as_global_default_with_config(
         tracing_wasm::WASMLayerConfigBuilder::default()
-            .set_max_level(tracing::Level::WARN)
+            .set_max_level(Level::DEBUG)
             .build(),
     );
     debug!("Loaded! Setting panic hook...");
@@ -45,6 +45,8 @@ fn main() -> Result<(), JsValue> {
 
 impl InnerState {
     async fn process_frame(&mut self, input_image: image::RgbaImage) -> anyhow::Result<()> {
+        let span = span!(Level::DEBUG, "process_frame");
+        let _guard = span.enter();
         let input = self.gpu.rgba_buffer_to_texture(
             input_image.as_raw(),
             input_image.width(),

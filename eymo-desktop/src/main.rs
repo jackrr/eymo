@@ -10,11 +10,11 @@ use nokhwa::pixel_format::RgbAFormat;
 use pollster::FutureExt;
 use std::path::PathBuf;
 use std::time::Instant;
-use tracing::{debug, error, span, trace, warn, Level};
+use tracing::{Level, debug, error, span, trace, warn};
 use tracing_subscriber;
-use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::EnvFilter;
-use video::{create_input_stream, OutputVideoStream};
+use tracing_subscriber::fmt::format::FmtSpan;
+use video::{OutputVideoStream, create_input_stream};
 
 mod video;
 

@@ -1,6 +1,7 @@
 use super::gpu::GpuExecutor;
 use super::vertex::Vertex;
 use anyhow::Result;
+use tracing::{Level, span};
 use wgpu::util::DeviceExt;
 
 pub fn resize_texture(
@@ -9,6 +10,9 @@ pub fn resize_texture(
     width: u32,
     height: u32,
 ) -> Result<wgpu::Texture> {
+    let span = span!(Level::DEBUG, "resize_texture");
+    let _guard = span.enter();
+
     let sampler = gpu.device.create_sampler(&wgpu::SamplerDescriptor {
         address_mode_u: wgpu::AddressMode::ClampToEdge,
         address_mode_v: wgpu::AddressMode::ClampToEdge,

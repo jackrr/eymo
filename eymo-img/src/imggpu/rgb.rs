@@ -2,8 +2,8 @@ use super::gpu::GpuExecutor;
 use super::util::{int_div_round_up, padded_bytes_per_row};
 use anyhow::Result;
 use image::RgbaImage;
-use tracing::{span, Level};
-use tract_onnx::prelude::Tensor;
+use tracing::{Level, span};
+use tract_nnef::prelude::Tensor;
 
 pub enum OutputRange {
     ZeroToOne,
@@ -91,6 +91,7 @@ pub fn texture_to_rgba(gpu: &GpuExecutor, texture: &wgpu::Texture) -> RgbaImage 
     RgbaImage::from_raw(width, height, pixels).unwrap()
 }
 
+// FIXME: this takes 15-60ms on WASM!
 pub async fn texture_to_tensor(
     gpu: &mut GpuExecutor,
     texture: &wgpu::Texture,
@@ -159,6 +160,8 @@ pub async fn texture_to_tensor(
     );
     drop(compute_pass);
 
+    let compute_span = span!(Level::DEBUG, "texture_to_rgba:compute_pass");
+    let compute_guard = compute_span.enter();
     let map_buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("map_buf"),
         size: buffer_size.into(),
@@ -169,9 +172,14 @@ pub async fn texture_to_tensor(
     encoder.copy_buffer_to_buffer(&output_buffer, 0, &map_buffer, 0, buffer_size.into());
 
     gpu.queue.submit(std::iter::once(encoder.finish()));
+    drop(compute_guard);
 
+    let map_span = span!(Level::DEBUG, "texture_to_rgba:map_pass");
+    let map_guard = map_span.enter();
     let buffer_slice = map_buffer.slice(..);
     let (s, r) = futures::channel::oneshot::channel();
+    // let done = Arc::new(Mutex::new(false));
+    // let done_async = Arc::clone(&done);
 
     // Theory: In wasm land, the callback needs this calling logic to
     // run async, so that this function can pause while the callback
@@ -180,8 +188,14 @@ pub async fn texture_to_tensor(
     // channel doesn't work, because the checking loop is hogging the
     // event loop, preventing the callback from running...
     // Can't see a way other than making this logic async...
-    buffer_slice.map_async(wgpu::MapMode::Read, |r| {
+    buffer_slice.map_async(wgpu::MapMode::Read, move |r| {
         s.send(()).unwrap();
+        // match done_async.lock() {
+        //     Err(e) => warn!("Failed to get mutex lock in map_async {e:?}"),
+        //     Ok(mut done) => {
+        //         *done = true;
+        //     }
+        // }
         r.unwrap();
     });
 
@@ -189,6 +203,9 @@ pub async fn texture_to_tensor(
     // gpu.device.poll(wgpu::PollType::Wait)?;
     // let result = panic::catch_unwind(|| {
     gpu.device.poll(wgpu::Maintain::wait()).panic_on_timeout();
+    drop(map_guard);
+    let future_span = span!(Level::DEBUG, "texture_to_rgba:future_pass");
+    let future_guard = future_span.enter();
     // });
 
     // if result.is_err() {
@@ -196,7 +213,20 @@ pub async fn texture_to_tensor(
     // }
 
     r.await?;
-    
+    // loop {
+    //     // TODO: need to free up event loop once per iter (this is locking everything in wasm duh)
+    //     warn!("IN LOOP CHECKING STATUS");
+    //     match done.lock() {
+    //         Err(e) => warn!("Failed to get mutex lock in watcher... {e:?}"),
+    //         Ok(done) => {
+    //             if *done {
+    //                 break;
+    //             }
+    //         }
+    //     }
+    // }
+    drop(future_guard);
+
     let buffer_data = buffer_slice.get_mapped_range();
     let res = bytemuck::cast_slice::<u8, f32>(&*buffer_data);
     let tensor = Tensor::from_shape::<f32>(

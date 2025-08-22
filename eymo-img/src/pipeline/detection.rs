@@ -7,7 +7,7 @@ use crate::shapes::rect::{Rect, RectF32};
 use anchors::gen_anchors;
 use anyhow::Result;
 use tracing::{Level, info, span, trace};
-use tract_onnx::prelude::tvec;
+use tract_nnef::prelude::tvec;
 
 mod anchors;
 
@@ -44,7 +44,7 @@ impl Face {
     }
 }
 
-const MODEL: &[u8; 418490] = include_bytes!("./mediapipe_face_detection_short_range.onnx");
+const MODEL: &[u8; 254484] = include_bytes!("./face_detection.tar.gz");
 
 impl FaceDetector {
     /*
@@ -87,10 +87,16 @@ impl FaceDetector {
         let tensor = imggpu::rgb::texture_to_tensor(
             gpu,
             &resize_output_tex,
+            // NegOneToOne is the slow one ? ...
             imggpu::rgb::OutputRange::NegOneToOne,
         )
         .await?;
+
+        // FIXME: this takes ~45ms on WASM!
+        let model_span = span!(Level::DEBUG, "face_detector:model_run");
+        let model_guard = model_span.enter();
         let outputs = self.model.run(tvec!(tensor.into()))?;
+        drop(model_guard);
 
         let x_scale = tex.width() as f32 / WIDTH as f32;
         let y_scale = tex.height() as f32 / HEIGHT as f32;

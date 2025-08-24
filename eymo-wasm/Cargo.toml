@@ -26,7 +26,7 @@ tracing = "0.1.41"
 tracing-wasm = "0.2.1"
 wasm-bindgen = { version = "0.2.100" }
 wasm-bindgen-futures = "0.4.50"
-wgpu = { version = "24.0.5", features = ["webgpu"] }
+wgpu = { version = "26.0.1", features = ["webgpu"] }
 
 [dependencies.web-sys]
 version = "0.3.77"

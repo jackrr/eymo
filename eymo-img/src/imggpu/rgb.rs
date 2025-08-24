@@ -19,7 +19,7 @@ impl OutputRange {
     }
 }
 
-pub fn texture_to_rgba(gpu: &GpuExecutor, texture: &wgpu::Texture) -> RgbaImage {
+pub fn texture_to_rgba(gpu: &GpuExecutor, texture: &wgpu::Texture) -> Result<RgbaImage> {
     // ~9ms
     let span = span!(Level::DEBUG, "texture_to_rgba");
     let _guard = span.enter();
@@ -68,15 +68,7 @@ pub fn texture_to_rgba(gpu: &GpuExecutor, texture: &wgpu::Texture) -> RgbaImage 
     let buffer_slice = buffer.slice(..);
     buffer_slice.map_async(wgpu::MapMode::Read, |r| r.unwrap());
 
-    // wgpu >=v25:
-    // gpu.device.poll(wgpu::PollType::Wait)?;
-    // let result = panic::catch_unwind(|| {
-    gpu.device.poll(wgpu::Maintain::wait()).panic_on_timeout();
-    // });
-
-    // if result.is_err() {
-    //     return Err(Error::msg("Timed out waiting for gpu device"));
-    // }
+    gpu.device.poll(wgpu::PollType::Wait)?;
 
     let padded_data = buffer_slice.get_mapped_range();
     let mut pixels: Vec<u8> = vec![0; unpadded_bytes_per_row * height as usize];
@@ -88,7 +80,7 @@ pub fn texture_to_rgba(gpu: &GpuExecutor, texture: &wgpu::Texture) -> RgbaImage 
     }
     drop(padded_data);
 
-    RgbaImage::from_raw(width, height, pixels).unwrap()
+    Ok(RgbaImage::from_raw(width, height, pixels).unwrap())
 }
 
 // NOTE: This is slow as heck in chrome on windows and linux, but fast in chrome on MacOS
@@ -169,7 +161,7 @@ pub async fn texture_to_tensor(
         mapped_at_creation: false,
     });
 
-    encoder.copy_buffer_to_buffer(&output_buffer, 0, &map_buffer, 0, buffer_size.into());
+    encoder.copy_buffer_to_buffer(&output_buffer, 0, &map_buffer, 0, buffer_size as u64);
 
     gpu.queue.submit(std::iter::once(encoder.finish()));
     drop(compute_guard);
@@ -177,6 +169,9 @@ pub async fn texture_to_tensor(
     let map_span = span!(Level::DEBUG, "texture_to_rgba:map_pass");
     let map_guard = map_span.enter();
     let buffer_slice = map_buffer.slice(..);
+
+    // NOTE: gpu.device.poll returns before memory is mapped in WASM (at least in Chromium on Linux)
+    // HACK: To fix, use a oneshot channel to wait until map callback executes
     let (s, r) = futures::channel::oneshot::channel();
 
     buffer_slice.map_async(wgpu::MapMode::Read, move |r| {
@@ -184,18 +179,10 @@ pub async fn texture_to_tensor(
         r.unwrap();
     });
 
-    // wgpu >=v25:
-    // gpu.device.poll(wgpu::PollType::Wait)?;
-    // let result = panic::catch_unwind(|| {
-    gpu.device.poll(wgpu::Maintain::wait()).panic_on_timeout();
+    gpu.device.poll(wgpu::PollType::Wait)?;
     drop(map_guard);
     let future_span = span!(Level::DEBUG, "texture_to_rgba:future_pass");
     let future_guard = future_span.enter();
-    // });
-
-    // if result.is_err() {
-    //     return Err(Error::msg("Timed out waiting for gpu device"));
-    // }
 
     r.await?;
     drop(future_guard);

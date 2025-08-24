@@ -181,7 +181,7 @@ fn process_frame(
         Ok(_) => {}
         Err(e) => {
             error!("{e:?}");
-            return Ok(rgb::texture_to_rgba(gpu, &texture));
+            return rgb::texture_to_rgba(gpu, &texture);
         }
     };
 
@@ -189,7 +189,7 @@ fn process_frame(
         check_time(within_ms, start, waypoint)
     });
 
-    let img = rgb::texture_to_rgba(gpu, &output);
+    let img = rgb::texture_to_rgba(gpu, &output)?;
     if store_detection {
         detection_cache.replace(detection);
     }

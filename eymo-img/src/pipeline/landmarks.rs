@@ -194,6 +194,7 @@ impl FaceLandmarker {
                     load: wgpu::LoadOp::Clear(Default::default()),
                     store: wgpu::StoreOp::Store,
                 },
+                depth_slice: None,
             })],
             ..Default::default()
         });
@@ -213,7 +214,6 @@ impl FaceLandmarker {
             imggpu::rgb::texture_to_tensor(gpu, &output_tex, imggpu::rgb::OutputRange::ZeroToOne)
                 .await?;
 
-        // FIXME: this takes ~65ms on WASM!
         let model_span = span!(Level::DEBUG, "face_landmarker:model_run");
         let model_guard = model_span.enter();
         let outputs = self.model.run(tvec!(tensor.into()))?;

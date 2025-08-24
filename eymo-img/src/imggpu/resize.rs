@@ -126,6 +126,7 @@ pub fn resize_texture(
                 load: wgpu::LoadOp::Clear(Default::default()),
                 store: wgpu::StoreOp::Store, // overwrite with fragment output
             },
+            depth_slice: None,
         })],
         ..Default::default()
     });

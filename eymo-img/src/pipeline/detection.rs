@@ -92,7 +92,6 @@ impl FaceDetector {
         )
         .await?;
 
-        // FIXME: this takes ~45ms on WASM!
         let model_span = span!(Level::DEBUG, "face_detector:model_run");
         let model_guard = model_span.enter();
         let outputs = self.model.run(tvec!(tensor.into()))?;

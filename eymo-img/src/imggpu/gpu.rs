@@ -1,5 +1,5 @@
 use super::util::padded_bytes_per_row;
-use anyhow::{Error, Result};
+use anyhow::Result;
 use image::{DynamicImage, RgbaImage};
 #[cfg(not(target_arch = "wasm32"))]
 use pollster::FutureExt;
@@ -22,28 +22,21 @@ impl GpuExecutor {
             backends: wgpu::Backends::all(),
             flags: wgpu::InstanceFlags::VALIDATION,
             backend_options: wgpu::BackendOptions::default(),
+            memory_budget_thresholds: Default::default(),
         });
 
-        let adapter = match instance
+        let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions::default())
-            .await
-        {
-            Some(adapter) => adapter,
-            None => {
-                return Err(Error::msg("Failed to find an appropriate wgpu adapter"));
-            }
-        };
+            .await?;
 
         let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::default(),
-                    memory_hints: wgpu::MemoryHints::Performance,
-                    label: Some("device"),
-                },
-                None,
-            )
+            .request_device(&wgpu::DeviceDescriptor {
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::default(),
+                memory_hints: wgpu::MemoryHints::Performance,
+                label: Some("device"),
+                trace: Default::default(),
+            })
             .await?;
 
         Ok(Self {
@@ -68,6 +61,7 @@ impl GpuExecutor {
             backends: wgpu::Backends::BROWSER_WEBGPU,
             flags: wgpu::InstanceFlags::VALIDATION,
             backend_options: wgpu::BackendOptions::default(),
+            memory_budget_thresholds: Default::default(),
         });
 
         let width = canvas.width();
@@ -75,30 +69,22 @@ impl GpuExecutor {
 
         let surface = instance.create_surface(wgpu::SurfaceTarget::Canvas(canvas))?;
 
-        let adapter = match instance
+        let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::default(),
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
             })
-            .await
-        {
-            Some(adapter) => adapter,
-            None => {
-                return Err(Error::msg("Failed to find an appropriate wgpu adapter"));
-            }
-        };
+            .await?;
 
         let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::default(),
-                    memory_hints: wgpu::MemoryHints::Performance,
-                    label: Some("device"),
-                },
-                None,
-            )
+            .request_device(&wgpu::DeviceDescriptor {
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::default(),
+                memory_hints: wgpu::MemoryHints::Performance,
+                label: Some("device"),
+                trace: Default::default(),
+            })
             .await
             .expect("Unable to find a suitable GPU adapter!");
 
@@ -178,15 +164,7 @@ impl GpuExecutor {
         let buffer_slice = buffer.slice(..);
         buffer_slice.map_async(wgpu::MapMode::Read, |r| r.unwrap());
 
-        // wgpu >=v25:
-        // self.device.poll(wgpu::PollType::Wait)?;
-        // let result = panic::catch_unwind(|| {
-        self.device.poll(wgpu::Maintain::wait()).panic_on_timeout();
-        // });
-
-        // if result.is_err() {
-        //     return Err(Error::msg("Timed out waiting for gpu device"));
-        // }
+        self.device.poll(wgpu::PollType::Wait)?;
 
         let padded_data = buffer_slice.get_mapped_range();
         let mut pixels: Vec<u8> = vec![0; unpadded_bytes_per_row * height as usize];

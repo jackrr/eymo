@@ -598,6 +598,7 @@ impl GpuGunk {
                     load: wgpu::LoadOp::Load, // preserve underlying image
                     store: wgpu::StoreOp::Store,
                 },
+                depth_slice: None,
             })],
             ..Default::default()
         });

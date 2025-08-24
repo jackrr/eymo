@@ -17,10 +17,12 @@ lalrpop-util = { version = "0.21.0", features = ["lexer", "unicode"] }
 pollster = "0.4.0"
 robust = "1.2.0"
 tracing = "0.1.41"
-tract-nnef = "0.21.13"
+# See https://github.com/pulls
+# tract-nnef = "0.21.13"
+tract-nnef = { git = "https://github.com/jackrr/tract" }
 web-sys = { version = "0.3.77", features = ["HtmlCanvasElement"] }
 web-time = "1.1.0"
-wgpu = "24.0.5"
+wgpu = "26.0.1"
 
 [build-dependencies]
 lalrpop = "0.22.2"

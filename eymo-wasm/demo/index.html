@@ -6,7 +6,7 @@
 	<body style="background-color: #000">
 		<h1 style="color: #fff">Eymo WASM Demo</h1>
 		<canvas id="canvas" width="640" height="480"></canvas>
-		<input type="textarea" id="cmd" value="face: swap_with(face+1), scale(3.5)"/>
+		<textarea id="cmd" value="face: swap_with(face+1), scale(3.5)">face: swap_with(face+1), scale(3.5)</textarea>
 		<button id="submit">Submit</button>
 		<button id="play">Play</button>
 		<button id="stop">Stop</button>
@@ -42,12 +42,6 @@
 				})
 
 				thing.start();
-
-				setTimeout(() => {
-					console.log("Updating canvas width...")
-					let canvas = document.getElementById("canvas")
-					canvas.width = 1000;
-				}, 10000)
 			}
 
 			run();

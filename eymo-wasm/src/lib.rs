@@ -8,7 +8,7 @@ use eymo_img::pipeline::{Detection, Pipeline};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
-use tracing::{Level, debug, error, info, span};
+use tracing::{Level, debug, error, info, span, trace};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::*;
@@ -35,7 +35,7 @@ struct InnerState {
 fn main() -> Result<(), JsValue> {
     tracing_wasm::set_as_global_default_with_config(
         tracing_wasm::WASMLayerConfigBuilder::default()
-            .set_max_level(Level::DEBUG)
+            .set_max_level(Level::WARN)
             .build(),
     );
     debug!("Loaded! Setting panic hook...");
@@ -234,7 +234,7 @@ impl State {
                             .unwrap()
                             .unchecked_into::<VideoFrame>();
                     info!(
-                        "{}x{}",
+                        "Got frame with dims {}x{}",
                         video_frame.coded_width(),
                         video_frame.coded_height()
                     );
@@ -250,13 +250,12 @@ impl State {
                     match is.resize_rx.try_recv() {
                         Ok(_) => {
                             debug!("Resizing!");
-                            is.resize_rx.recv().await;
                             is.config.width = is.canvas.width();
                             is.config.height = is.canvas.height();
                             is.surface.configure(&is.gpu.device, &is.config);
                         }
                         Err(_) => {
-                            // No resize queued
+                            trace!("No resize queued, continuing...");
                         }
                     }
 

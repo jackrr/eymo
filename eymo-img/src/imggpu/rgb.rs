@@ -91,7 +91,7 @@ pub fn texture_to_rgba(gpu: &GpuExecutor, texture: &wgpu::Texture) -> RgbaImage 
     RgbaImage::from_raw(width, height, pixels).unwrap()
 }
 
-// FIXME: this takes 15-60ms on WASM!
+// NOTE: This is slow as heck in chrome on windows and linux, but fast in chrome on MacOS
 pub async fn texture_to_tensor(
     gpu: &mut GpuExecutor,
     texture: &wgpu::Texture,
@@ -178,24 +178,9 @@ pub async fn texture_to_tensor(
     let map_guard = map_span.enter();
     let buffer_slice = map_buffer.slice(..);
     let (s, r) = futures::channel::oneshot::channel();
-    // let done = Arc::new(Mutex::new(false));
-    // let done_async = Arc::clone(&done);
 
-    // Theory: In wasm land, the callback needs this calling logic to
-    // run async, so that this function can pause while the callback
-    // executes on the event loop.
-    // My silly hack using a loop that checks the status of a oneshot
-    // channel doesn't work, because the checking loop is hogging the
-    // event loop, preventing the callback from running...
-    // Can't see a way other than making this logic async...
     buffer_slice.map_async(wgpu::MapMode::Read, move |r| {
         s.send(()).unwrap();
-        // match done_async.lock() {
-        //     Err(e) => warn!("Failed to get mutex lock in map_async {e:?}"),
-        //     Ok(mut done) => {
-        //         *done = true;
-        //     }
-        // }
         r.unwrap();
     });
 
@@ -213,18 +198,6 @@ pub async fn texture_to_tensor(
     // }
 
     r.await?;
-    // loop {
-    //     // TODO: need to free up event loop once per iter (this is locking everything in wasm duh)
-    //     warn!("IN LOOP CHECKING STATUS");
-    //     match done.lock() {
-    //         Err(e) => warn!("Failed to get mutex lock in watcher... {e:?}"),
-    //         Ok(done) => {
-    //             if *done {
-    //                 break;
-    //             }
-    //         }
-    //     }
-    // }
     drop(future_guard);
 
     let buffer_data = buffer_slice.get_mapped_range();

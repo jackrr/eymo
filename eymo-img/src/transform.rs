@@ -168,6 +168,7 @@ impl Transform {
             vertices.push(self.gen_vertices(tex, &op, &next_cache_val));
             self.cache.insert(op.id.clone(), next_cache_val);
         }
+        self.last_tick = Instant::now();
 
         let sampler = self.sampler(gpu);
         self.gpu_gunk.execute(
@@ -183,7 +184,7 @@ impl Transform {
     fn tick(&self, shape: &Shape, tex: &wgpu::Texture, prev: Option<ShapeOpState>) -> ShapeOpState {
         // animate spin and drift since last iteration
         let mut next_state = ShapeOpState::default();
-        let last = self.last_tick;
+        let time_elapsed = self.last_tick.elapsed().as_secs_f32();
 
         let defaults = (
             self.rotate_deg.unwrap_or(0.),
@@ -202,13 +203,13 @@ impl Transform {
 
         if self.rps.is_some() {
             let rps = self.rps.unwrap();
-            next_state.rotate_deg = Some(rotate_deg + 360. * rps * last.elapsed().as_secs_f32());
+            next_state.rotate_deg = Some(rotate_deg + 360. * rps * time_elapsed);
         } else if self.rotate_deg.is_some() {
             next_state.rotate_deg = self.rotate_deg.clone();
         }
 
         if self.drift_vec.is_some() {
-            let hyp = vel * last.elapsed().as_secs_f32();
+            let hyp = vel * time_elapsed;
             let dy = (ang.to_radians().cos() * hyp).round() as i32;
             let dx = (ang.to_radians().sin() * hyp).round() as i32;
 

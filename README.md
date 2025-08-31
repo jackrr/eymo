@@ -2,6 +2,8 @@
 
 Ey(e)mo(uth) is a program that does fun things with a video stream of a face.
 
+You can view the live WASM version [here](https://jackratner.com/projects/eymo) or follow the installation instructions below to run on desktop.
+
 ## Installation / first time setup
 
 ### Desktop

@@ -35,7 +35,7 @@ struct InnerState {
 fn main() -> Result<(), JsValue> {
     tracing_wasm::set_as_global_default_with_config(
         tracing_wasm::WASMLayerConfigBuilder::default()
-            .set_max_level(Level::DEBUG)
+            .set_max_level(Level::WARN)
             .build(),
     );
     debug!("Loaded! Setting panic hook...");
@@ -60,13 +60,13 @@ impl InnerState {
         let detection = match self.detection_cache.take() {
             Some(detection) => detection,
             None => {
-                debug!("Running detection..");
+                debug!("Running detection...");
                 replace_detection = true;
                 self.pipeline.run_gpu(&input, &mut self.gpu).await?
             }
         };
 
-        debug!("Running transforms..");
+        debug!("Running transforms...");
         let result = self
             .interpreter
             .execute(&detection, input, &mut self.gpu, |_| Ok(()));
@@ -253,7 +253,7 @@ impl State {
         Ok(())
     }
 
-    // FIXME: video is frozen on first load
+    // NOTE: This appears frozen if called before user interacts with page on iOS
     async fn process_with_video_element(&self, stream: MediaStream) -> Result<(), JsValue> {
         let browser_window = wgpu::web_sys::window().unwrap_throw();
         let document = browser_window.document().unwrap_throw();
@@ -262,17 +262,18 @@ impl State {
         let video = document
             .create_element("video")?
             .unchecked_into::<HtmlVideoElement>();
+
+        debug!("Setting srcObject on shadow HTMLVideoElement...");
         video.set_src_object(Some(&stream));
         video.set_autoplay(true);
         video.set_muted(true);
 
         // Wait for video to be ready
         let video_ready = js_sys::Promise::new(&mut |resolve, _| {
-            let video_clone = video.clone();
             let onloadeddata: Closure<dyn FnMut()> = Closure::new(move || {
                 resolve.call0(&JsValue::NULL).unwrap_throw();
             });
-            video_clone.set_onloadeddata(Some(onloadeddata.as_ref().unchecked_ref()));
+            video.set_onloadeddata(Some(onloadeddata.as_ref().unchecked_ref()));
             onloadeddata.forget();
         });
         JsFuture::from(video_ready).await?;
@@ -291,8 +292,13 @@ impl State {
             .unwrap()
             .unchecked_into::<CanvasRenderingContext2d>();
 
+        let mut frame_idx = 0;
+
         'frame_loop: loop {
+            debug!("Frame {frame_idx} iter start. Getting lock...");
             let mut is = self.inner_state.lock().await;
+            debug!("Frame {frame_idx} loop got lock.");
+
             if is.stop_rx.as_ref().is_some_and(|rx| !rx.is_empty()) {
                 break 'frame_loop;
             }
@@ -332,7 +338,7 @@ impl State {
             }
             drop(is);
 
-            debug!("Frame processed, doing delay thing...");
+            debug!("Frame {frame_idx} processed, doing delay thing...");
 
             // Small delay to prevent overwhelming the browser
             let delay = js_sys::Promise::new(&mut |resolve, _| {
@@ -350,7 +356,11 @@ impl State {
                     .unwrap();
                 after_timeout.forget();
             });
+
             JsFuture::from(delay).await?;
+
+            debug!("Frame {frame_idx} after delay.");
+            frame_idx += 1;
         }
 
         Ok(())
@@ -386,10 +396,6 @@ impl State {
         .await
         .unwrap()
         .unchecked_into::<MediaStream>();
-        let vid = stream
-            .get_video_tracks()
-            .get(0)
-            .unchecked_into::<MediaStreamTrack>();
 
         // Check if MediaStreamTrackProcessor is available
         let has_processor = js_sys::Reflect::has(
@@ -400,6 +406,11 @@ impl State {
 
         if has_processor {
             debug!("Using MediaStreamTrackProcessor");
+            let vid = stream
+                .get_video_tracks()
+                .get(0)
+                .unchecked_into::<MediaStreamTrack>();
+
             let proc = MediaStreamTrackProcessor::new(&MediaStreamTrackProcessorInit::new(&vid))?;
             let reader = proc
                 .readable()

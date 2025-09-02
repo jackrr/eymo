@@ -8,7 +8,7 @@ use eymo_img::pipeline::{Detection, Pipeline};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
-use tracing::{Level, debug, error, info, span, trace};
+use tracing::{Level, debug, error, info, span, trace, warn};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::*;
@@ -27,7 +27,7 @@ struct InnerState {
     config: wgpu::SurfaceConfiguration,
     detection_cache: Option<Detection>,
     stop_tx: Option<oneshot::Sender<()>>,
-    stop_rx: oneshot::Receiver<()>,
+    stop_rx: Option<oneshot::Receiver<()>>,
     resize_rx: mpsc::Receiver<()>,
 }
 
@@ -150,7 +150,6 @@ impl State {
 
         observer.observe(&canvas);
 
-        let (stop_tx, stop_rx) = oneshot::channel();
         let inner_state = Mutex::new(InnerState {
             interpreter,
             gpu,
@@ -159,8 +158,8 @@ impl State {
             config,
             canvas,
             detection_cache: None,
-            stop_tx: Some(stop_tx),
-            stop_rx,
+            stop_tx: None,
+            stop_rx: None,
             resize_rx,
         });
 
@@ -187,9 +186,16 @@ impl State {
 
     #[wasm_bindgen]
     pub async fn stop(&self) -> Result<(), JsValue> {
+        debug!("Stopping...");
+
         let mut is = self.inner_state.lock().await;
         let stop_tx = is.stop_tx.take();
-        stop_tx.unwrap().send(()).unwrap_throw();
+        drop(is);
+
+        match stop_tx {
+            Some(stop_tx) => stop_tx.send(()).unwrap_throw(),
+            None => warn!("Cannot stop when already stopped"),
+        };
 
         Ok(())
     }
@@ -213,7 +219,7 @@ impl State {
                     let img = img::from_frame(&video_frame).await?;
 
                     let mut is = self.inner_state.lock().await;
-                    if !is.stop_rx.is_empty() {
+                    if is.stop_rx.as_ref().is_some_and(|rx| !rx.is_empty()) {
                         video_frame.close();
                         break 'frame_loop;
                     }
@@ -247,6 +253,7 @@ impl State {
         Ok(())
     }
 
+    // FIXME: video is frozen on first load
     async fn process_with_video_element(&self, stream: MediaStream) -> Result<(), JsValue> {
         let browser_window = wgpu::web_sys::window().unwrap_throw();
         let document = browser_window.document().unwrap_throw();
@@ -275,14 +282,18 @@ impl State {
         let capture_canvas = document
             .create_element("canvas")?
             .unchecked_into::<HtmlCanvasElement>();
+
+        let canvas_ctx_opts = js_sys::Object::new();
+        js_sys::Reflect::set(&canvas_ctx_opts, &"willReadFrequently".into(), &true.into())?;
+
         let canvas_ctx = capture_canvas
-            .get_context("2d")?
+            .get_context_with_context_options("2d", &canvas_ctx_opts)?
             .unwrap()
             .unchecked_into::<CanvasRenderingContext2d>();
 
         'frame_loop: loop {
             let mut is = self.inner_state.lock().await;
-            if !is.stop_rx.is_empty() {
+            if is.stop_rx.as_ref().is_some_and(|rx| !rx.is_empty()) {
                 break 'frame_loop;
             }
 
@@ -290,37 +301,33 @@ impl State {
             let video_width = video.video_width();
             let video_height = video.video_height();
 
-            if video_width > 0 && video_height > 0 {
-                capture_canvas.set_width(video_width);
-                capture_canvas.set_height(video_height);
+            capture_canvas.set_width(video_width);
+            capture_canvas.set_height(video_height);
 
-                canvas_ctx.draw_image_with_html_video_element(&video, 0.0, 0.0)?;
+            canvas_ctx.draw_image_with_html_video_element(&video, 0.0, 0.0)?;
 
-                let image_data =
-                    canvas_ctx.get_image_data(0.0, 0.0, video_width as f64, video_height as f64)?;
-                let data = image_data.data();
-
-                // Convert to RgbaImage
-                let img = image::RgbaImage::from_raw(video_width, video_height, data.to_vec())
+            let image_data =
+                canvas_ctx.get_image_data(0.0, 0.0, video_width as f64, video_height as f64)?;
+            let img =
+                image::RgbaImage::from_raw(video_width, video_height, image_data.data().to_vec())
                     .ok_or_else(|| JsValue::from_str("Failed to create image from canvas data"))?;
 
-                match is.resize_rx.try_recv() {
-                    Ok(_) => {
-                        debug!("Resizing!");
-                        is.config.width = is.canvas.width();
-                        is.config.height = is.canvas.height();
-                        is.surface.configure(&is.gpu.device, &is.config);
-                    }
-                    Err(_) => {
-                        trace!("No resize queued, continuing...");
-                    }
+            match is.resize_rx.try_recv() {
+                Ok(_) => {
+                    debug!("Resizing!");
+                    is.config.width = is.canvas.width();
+                    is.config.height = is.canvas.height();
+                    is.surface.configure(&is.gpu.device, &is.config);
                 }
+                Err(_) => {
+                    trace!("No resize queued, continuing...");
+                }
+            }
 
-                match is.process_frame(img).await {
-                    Ok(_) => {}
-                    Err(e) => {
-                        error!("Failed to process frame: {}", e.to_string());
-                    }
+            match is.process_frame(img).await {
+                Ok(_) => {}
+                Err(e) => {
+                    error!("Failed to process frame: {}", e.to_string());
                 }
             }
             drop(is);
@@ -351,7 +358,22 @@ impl State {
 
     #[wasm_bindgen]
     pub async fn start(&self) -> Result<(), JsValue> {
-        debug!("Loading camera...");
+        debug!("Starting...");
+
+        // Re-init termination channel
+        let mut is = self.inner_state.lock().await;
+        let prev = is.stop_tx.as_ref();
+        if prev.is_some() && !prev.unwrap().is_closed() {
+            return Err(JsValue::from_str(
+                "Cannot start when already running. Invoke .stop on instance before calling start again.",
+            ));
+        }
+
+        let (stop_tx, stop_rx) = oneshot::channel();
+        is.stop_tx = Some(stop_tx);
+        is.stop_rx = Some(stop_rx);
+        drop(is);
+
         let browser_window = wgpu::web_sys::window().unwrap_throw();
         let devices = browser_window.navigator().media_devices().unwrap_throw();
         let constraints = MediaStreamConstraints::new();
@@ -368,12 +390,6 @@ impl State {
             .get_video_tracks()
             .get(0)
             .unchecked_into::<MediaStreamTrack>();
-        // Re-init termination channel
-        let mut is = self.inner_state.lock().await;
-        let (stop_tx, stop_rx) = oneshot::channel();
-        is.stop_tx = Some(stop_tx);
-        is.stop_rx = stop_rx;
-        drop(is);
 
         // Check if MediaStreamTrackProcessor is available
         let has_processor = js_sys::Reflect::has(

@@ -35,7 +35,7 @@ struct InnerState {
 fn main() -> Result<(), JsValue> {
     tracing_wasm::set_as_global_default_with_config(
         tracing_wasm::WASMLayerConfigBuilder::default()
-            .set_max_level(Level::WARN)
+            .set_max_level(Level::DEBUG)
             .build(),
     );
     debug!("Loaded! Setting panic hook...");
@@ -194,38 +194,10 @@ impl State {
         Ok(())
     }
 
-    #[wasm_bindgen]
-    pub async fn start(&self) -> Result<(), JsValue> {
-        debug!("Loading camera...");
-        let browser_window = wgpu::web_sys::window().unwrap_throw();
-        let devices = browser_window.navigator().media_devices().unwrap_throw();
-        let constraints = MediaStreamConstraints::new();
-        constraints.set_video(&js_sys::Boolean::from(true));
-        let stream = JsFuture::from(
-            devices
-                .get_user_media_with_constraints(&constraints)
-                .unwrap_throw(),
-        )
-        .await
-        .unwrap()
-        .unchecked_into::<MediaStream>();
-        let vid = stream
-            .get_video_tracks()
-            .get(0)
-            .unchecked_into::<MediaStreamTrack>();
-        let proc = MediaStreamTrackProcessor::new(&MediaStreamTrackProcessorInit::new(&vid))?;
-        let reader = proc
-            .readable()
-            .get_reader()
-            .unchecked_into::<ReadableStreamDefaultReader>();
-
-        // Re-init termination channel
-        let mut is = self.inner_state.lock().await;
-        let (stop_tx, stop_rx) = oneshot::channel();
-        is.stop_tx = Some(stop_tx);
-        is.stop_rx = stop_rx;
-        drop(is);
-
+    async fn process_with_reader(
+        &self,
+        reader: ReadableStreamDefaultReader,
+    ) -> Result<(), JsValue> {
         'frame_loop: loop {
             match JsFuture::from(reader.read()).await {
                 Ok(js_frame) => {
@@ -242,7 +214,6 @@ impl State {
 
                     let mut is = self.inner_state.lock().await;
                     if !is.stop_rx.is_empty() {
-                        // terminate message sent
                         video_frame.close();
                         break 'frame_loop;
                     }
@@ -272,6 +243,157 @@ impl State {
                     error!("Failed to read frame: {e:?}");
                 }
             }
+        }
+        Ok(())
+    }
+
+    async fn process_with_video_element(&self, stream: MediaStream) -> Result<(), JsValue> {
+        let browser_window = wgpu::web_sys::window().unwrap_throw();
+        let document = browser_window.document().unwrap_throw();
+
+        // Create a video element to capture frames
+        let video = document
+            .create_element("video")?
+            .unchecked_into::<HtmlVideoElement>();
+        video.set_src_object(Some(&stream));
+        video.set_autoplay(true);
+        video.set_muted(true);
+
+        // Wait for video to be ready
+        let video_ready = js_sys::Promise::new(&mut |resolve, _| {
+            let video_clone = video.clone();
+            let onloadeddata: Closure<dyn FnMut()> = Closure::new(move || {
+                resolve.call0(&JsValue::NULL).unwrap_throw();
+            });
+            video_clone.set_onloadeddata(Some(onloadeddata.as_ref().unchecked_ref()));
+            onloadeddata.forget();
+        });
+        JsFuture::from(video_ready).await?;
+        debug!("Video ready.");
+
+        // Create canvas for frame capture
+        let capture_canvas = document
+            .create_element("canvas")?
+            .unchecked_into::<HtmlCanvasElement>();
+        let canvas_ctx = capture_canvas
+            .get_context("2d")?
+            .unwrap()
+            .unchecked_into::<CanvasRenderingContext2d>();
+
+        'frame_loop: loop {
+            let mut is = self.inner_state.lock().await;
+            if !is.stop_rx.is_empty() {
+                break 'frame_loop;
+            }
+
+            // Capture frame from video
+            let video_width = video.video_width();
+            let video_height = video.video_height();
+
+            if video_width > 0 && video_height > 0 {
+                capture_canvas.set_width(video_width);
+                capture_canvas.set_height(video_height);
+
+                canvas_ctx.draw_image_with_html_video_element(&video, 0.0, 0.0)?;
+
+                let image_data =
+                    canvas_ctx.get_image_data(0.0, 0.0, video_width as f64, video_height as f64)?;
+                let data = image_data.data();
+
+                // Convert to RgbaImage
+                let img = image::RgbaImage::from_raw(video_width, video_height, data.to_vec())
+                    .ok_or_else(|| JsValue::from_str("Failed to create image from canvas data"))?;
+
+                match is.resize_rx.try_recv() {
+                    Ok(_) => {
+                        debug!("Resizing!");
+                        is.config.width = is.canvas.width();
+                        is.config.height = is.canvas.height();
+                        is.surface.configure(&is.gpu.device, &is.config);
+                    }
+                    Err(_) => {
+                        trace!("No resize queued, continuing...");
+                    }
+                }
+
+                match is.process_frame(img).await {
+                    Ok(_) => {}
+                    Err(e) => {
+                        error!("Failed to process frame: {}", e.to_string());
+                    }
+                }
+            }
+            drop(is);
+
+            debug!("Frame processed, doing delay thing...");
+
+            // Small delay to prevent overwhelming the browser
+            let delay = js_sys::Promise::new(&mut |resolve, _| {
+                let window = web_sys::window().unwrap();
+                let after_timeout: Closure<dyn FnMut()> =
+                    wasm_bindgen::closure::Closure::new(move || {
+                        debug!("Calling resolve from within closure");
+                        resolve.call0(&JsValue::NULL).unwrap_throw();
+                    });
+                window
+                    .set_timeout_with_callback_and_timeout_and_arguments_0(
+                        after_timeout.as_ref().unchecked_ref(),
+                        16, // ~60fps
+                    )
+                    .unwrap();
+                after_timeout.forget();
+            });
+            JsFuture::from(delay).await?;
+        }
+
+        Ok(())
+    }
+
+    #[wasm_bindgen]
+    pub async fn start(&self) -> Result<(), JsValue> {
+        debug!("Loading camera...");
+        let browser_window = wgpu::web_sys::window().unwrap_throw();
+        let devices = browser_window.navigator().media_devices().unwrap_throw();
+        let constraints = MediaStreamConstraints::new();
+        constraints.set_video(&js_sys::Boolean::from(true));
+        let stream = JsFuture::from(
+            devices
+                .get_user_media_with_constraints(&constraints)
+                .unwrap_throw(),
+        )
+        .await
+        .unwrap()
+        .unchecked_into::<MediaStream>();
+        let vid = stream
+            .get_video_tracks()
+            .get(0)
+            .unchecked_into::<MediaStreamTrack>();
+        // Re-init termination channel
+        let mut is = self.inner_state.lock().await;
+        let (stop_tx, stop_rx) = oneshot::channel();
+        is.stop_tx = Some(stop_tx);
+        is.stop_rx = stop_rx;
+        drop(is);
+
+        // Check if MediaStreamTrackProcessor is available
+        let has_processor = js_sys::Reflect::has(
+            &js_sys::global(),
+            &js_sys::JsString::from("MediaStreamTrackProcessor"),
+        )
+        .unwrap_or(false);
+
+        if has_processor {
+            debug!("Using MediaStreamTrackProcessor");
+            let proc = MediaStreamTrackProcessor::new(&MediaStreamTrackProcessorInit::new(&vid))?;
+            let reader = proc
+                .readable()
+                .get_reader()
+                .unchecked_into::<ReadableStreamDefaultReader>();
+
+            self.process_with_reader(reader).await?;
+        } else {
+            debug!("MediaStreamTrackProcessor not available, using video element fallback");
+            self.process_with_video_element(stream).await?;
         }
 
         Ok(())

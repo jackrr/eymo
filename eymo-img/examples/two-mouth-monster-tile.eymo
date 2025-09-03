@@ -1,0 +1,4 @@
+nose: scale(0.8), channels(0.8, 0.8, 1.2)
+mouth: flip(vertical), scale(1.6), copy_to(leye_region+1), brighten(1.2)
+reye_region: scale(1.6), swap_with(mouth+1), brighten(1.2)
+face: tile, flip(vertical)

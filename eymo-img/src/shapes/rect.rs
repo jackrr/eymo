@@ -1,7 +1,7 @@
 use super::point::Point;
 use super::polygon::Polygon;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq)]
 pub struct Rect {
     // centerpoint
     pub x: u32,
@@ -10,7 +10,7 @@ pub struct Rect {
     pub h: u32,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct RectF32 {
     // centerpoint
     pub x: f32,
@@ -36,6 +36,28 @@ impl Into<Rect> for RectF32 {
 impl PartialEq for Rect {
     fn eq(&self, o: &Rect) -> bool {
         self.x == o.x && self.y == o.y && self.w == o.w && self.h == o.h
+    }
+}
+
+impl Ord for Rect {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        let x = self.x.cmp(&other.x);
+        if !x.is_eq() {
+            return x;
+        }
+
+        let y = self.y.cmp(&other.y);
+        if !y.is_eq() {
+            return y;
+        }
+
+        self.area().cmp(&other.area())
+    }
+}
+
+impl PartialOrd for Rect {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }
 

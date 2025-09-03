@@ -13,8 +13,7 @@ You can view the live WASM version [here](https://jackratner.com/projects/eymo) 
 3. Run: `cargo build --release` from within the `eymo-desktop` directory
 
 Compiled binary will be at
-`./eymo-desktop/target/release/eymo-desktop`. Run the command to see
-usage instructions.
+`./eymo-desktop/target/release/eymo-desktop`. Run the command with the `-h` or `--help` flag to see usage instructions.
 
 By default, eymo will stream output to a child `ffplay` process for
 display in a window. To stream output to a virtual webcam device see
@@ -116,10 +115,19 @@ saturate(1.5) // increase/decrease saturation of shape by given factor (in this 
 channels(1.5, 0.5, 0.8) // increase/decrease rgb levels by given factors (in this case 150% red, 50% green, 80% blue)
 ```
 
+## Navigating the codebase
 
-## Built with...
+See [overview.md](docs/overview.md) for more implementation details
 
-- [delaunator](https://github.com/mapbox/delaunator) reimplimented in rust within this project
+## Contributing
+
+Contributions are welcome! For bigger features or architectural suggestions, please open a new [issues](https://github.com/jackrr/eymo/issues) describing a change you'd like to make. For smaller changes or if you want to proceed with implementation, please fork the repo, verify your fix locally, open a pull request describing the desired change, and add [me](https://github.com/jackrr) as a reviewer.
+
+Excited by the project and unsure where to start? Check out the [issues](https://github.com/jackrr/eymo/issues) to find something to work on!
+
+## This could not have been built without the following:
+
+- [delaunator](https://github.com/mapbox/delaunator) reimplemented in rust within this project
 - [ffmpeg](https://ffmpeg.org/) output video streaming
 - [lalrpop](https://github.com/lalrpop/lalrpop) language parser
 - [mediapipe](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker) face detection and landmarker models

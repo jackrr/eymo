@@ -83,7 +83,7 @@ pub fn texture_to_rgba(gpu: &GpuExecutor, texture: &wgpu::Texture) -> Result<Rgb
     Ok(RgbaImage::from_raw(width, height, pixels).unwrap())
 }
 
-// NOTE: This is slow as heck in chrome on windows and linux, but fast in chrome on MacOS
+// NOTE: This is slow as heck in chrome on linux, but fast in chrome on MacOS
 pub async fn texture_to_tensor(
     gpu: &mut GpuExecutor,
     texture: &wgpu::Texture,

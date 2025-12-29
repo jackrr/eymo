@@ -42,6 +42,7 @@ FacePart: FacePart = {
 		"face" => FacePart::Face,
 		"nose" => FacePart::Nose,
 		"mouth" => FacePart::Mouth,
+		"forehead" => FacePart::Forehead,
 };
 
 Operations = CommaDelim<Operation>;

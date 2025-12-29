@@ -47,6 +47,31 @@ impl Polygon {
             .iter()
             .fold(self.points[0].x, |max, p| max.max(p.x))
     }
+
+    pub fn stretch(&mut self, mags: [f32; 4]) -> &mut Self {
+        let [dxl, dxr, dyt, dyb] = mags;
+        let center = self.center();
+
+        for p in self.points.iter_mut() {
+            if p.x < center.x {
+                p.x = center.x - mult(center.x - p.x, dxl);
+            }
+
+            if p.x > center.x {
+                p.x = center.x + mult(p.x - center.x, dxr);
+            }
+
+            if p.y < center.y {
+                p.y = center.y - mult(center.y - p.y, dyt);
+            }
+
+            if p.y > center.y {
+                p.y = center.y + mult(p.y - center.y, dyb);
+            }
+        }
+
+        self
+    }
 }
 
 impl From<Polygon> for Rect {
@@ -62,6 +87,10 @@ impl From<Polygon> for Rect {
 
 fn rounded_div(d: u32, q: u32) -> u32 {
     (d as f32 / q as f32).round() as u32
+}
+
+fn mult(v: u32, f: f32) -> u32 {
+    (v as f32 * f).round() as u32
 }
 
 #[test]

@@ -151,7 +151,7 @@ fn shape_ops(
 
 fn shape_ops_for_src_shape(
     cache_key_prefix: String,
-    src: (impl Into<Shape> + Clone),
+    src: impl Into<Shape> + Clone,
     ops: &Vec<ast::Operation>,
     detection: &Detection,
     target_face_idx: Option<usize>,
@@ -245,6 +245,7 @@ fn face_shape(p: &ast::FacePart, f: &Face) -> Shape {
         ast::FacePart::Face => f.face.clone(),
         ast::FacePart::Mouth => f.mouth.clone(),
         ast::FacePart::Nose => f.nose.clone(),
+        ast::FacePart::Forehead => f.forehead.clone(),
     }
     .into()
 }

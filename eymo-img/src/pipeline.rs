@@ -4,7 +4,7 @@ use crate::shapes::rect::Rect;
 use crate::{imggpu::gpu::GpuExecutor, shapes::polygon::Polygon};
 use detection::FaceDetector;
 use landmarks::FaceLandmarker;
-use tracing::{info, span, trace, Level};
+use tracing::{Level, info, span, trace};
 
 mod detection;
 mod landmarks;
@@ -26,6 +26,7 @@ pub struct Face {
     pub r_eye: Polygon,
     pub r_eye_region: Polygon,
     pub bound: Rect,
+    pub forehead: Polygon,
 }
 
 pub type Detection = Vec<Face>;
@@ -38,7 +39,11 @@ impl Pipeline {
         })
     }
 
-    pub async fn run_gpu(&mut self, tex: &wgpu::Texture, gpu: &mut GpuExecutor) -> Result<Detection> {
+    pub async fn run_gpu(
+        &mut self,
+        tex: &wgpu::Texture,
+        gpu: &mut GpuExecutor,
+    ) -> Result<Detection> {
         let span = span!(Level::DEBUG, "pipeline");
         let _guard = span.enter();
 

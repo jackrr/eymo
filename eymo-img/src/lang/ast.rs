@@ -58,6 +58,7 @@ pub enum FacePart {
     Face,
     Mouth,
     Nose,
+    Forehead,
 }
 
 impl fmt::Display for FacePart {

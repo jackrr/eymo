@@ -46,6 +46,10 @@ const NOSE_IDXS: [usize; 23] = [
     419, 351, 417,
 ];
 
+const FOREHEAD_IDXS: [usize; 14] = [
+    54, 68, 107, 9, 336, 298, 284, 332, 297, 338, 10, 109, 67, 103,
+];
+
 const MODEL: &[u8; 1435541] = include_bytes!("./face_landmark.tar.gz");
 
 impl FaceLandmarker {
@@ -298,6 +302,18 @@ fn extract_results(
             &origin,
             run_rot,
         ),
+        forehead: extract_feature(
+            r,
+            &FOREHEAD_IDXS,
+            x_offset,
+            y_offset,
+            x_scale,
+            y_scale,
+            &origin,
+            run_rot,
+        )
+        .stretch([1., 1., 1.9, 1.])
+        .to_owned(),
     })
 }
 

@@ -24,6 +24,7 @@ pub struct Transform {
     rps: Option<f32>,
     last_tick: Instant,
     drift_vec: Option<(f32, f32)>,
+    reshape: Option<[f32; 4]>,
     brightness_mod: f32,
     saturation_mod: f32,
     chans_mod: [f32; 4],
@@ -98,6 +99,7 @@ impl Transform {
             rps: None,
             translation: None,
             drift_vec: None,
+            reshape: None,
             cache: HashMap::new(),
             gpu_gunk: GpuGunk::init(gpu),
         }
@@ -113,6 +115,10 @@ impl Transform {
 
     pub fn set_chans(&mut self, r: f32, g: f32, b: f32) {
         self.chans_mod = [r, g, b, 1.];
+    }
+
+    pub fn set_reshape(&mut self, dxl: f32, dxr: f32, dyt: f32, dyb: f32) {
+        self.reshape = Some([dxl, dxr, dyt, dyb]);
     }
 
     pub fn set_flip(&mut self, f: FlipVariant) {
@@ -260,23 +266,24 @@ impl Transform {
 
         let mut vertex_groups = Vec::new();
 
+        let base = if let Some(reshape) = self.reshape {
+            &op.base.clone().stretch(reshape)
+        } else {
+            &op.base
+        };
+
         if op.swap.is_some() {
             let dest = op.swap.as_ref().unwrap();
-            vertex_groups.push(self.vertices_for_shapes(tex, &op.base, &dest, s));
-            vertex_groups.push(self.vertices_for_shapes(tex, &dest, &op.base, s));
+            vertex_groups.push(self.vertices_for_shapes(tex, base, &dest, s));
+            vertex_groups.push(self.vertices_for_shapes(tex, &dest, base, s));
         }
 
         if op.dest.is_some() {
-            vertex_groups.push(self.vertices_for_shapes(
-                tex,
-                &op.base,
-                op.dest.as_ref().unwrap(),
-                s,
-            ));
+            vertex_groups.push(self.vertices_for_shapes(tex, base, op.dest.as_ref().unwrap(), s));
         }
 
         if op.swap.is_none() && op.dest.is_none() {
-            vertex_groups.push(self.vertices_for_shapes(tex, &op.base, &op.base, s));
+            vertex_groups.push(self.vertices_for_shapes(tex, base, base, s));
         }
 
         vertex_groups.concat()

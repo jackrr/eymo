@@ -81,4 +81,5 @@ pub enum Operation {
     Brightness(f32),
     Saturation(f32),
     Chans(f32, f32, f32),
+    Reshape(f32, f32, f32, f32),
 }

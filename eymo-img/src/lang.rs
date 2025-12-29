@@ -76,9 +76,9 @@ fn build_transform(cmd: &ast::Transform, gpu: &mut GpuExecutor) -> Transform {
 fn apply_shape_agnostic_operations(t: &mut Transform, cmd: &ast::Transform) {
     for o in &cmd.operations {
         match o {
-            // TODO: gamma
             Operation::Brightness(b) => t.set_brightness(*b),
             Operation::Chans(r, g, b) => t.set_chans(*r, *g, *b),
+            Operation::Reshape(dxl, dxr, dyt, dyb) => t.set_reshape(*dxl, *dxr, *dyt, *dyb),
             Operation::Drift(velocity, angle) => t.set_drift(*velocity, *angle),
             Operation::Flip(v) => t.set_flip(*v),
             Operation::Rotate(r) => t.set_rot_degrees(*r),

@@ -1,5 +1,6 @@
 use super::point::Point;
 use super::polygon::Polygon;
+use super::util::mult;
 
 #[derive(Debug, Copy, Clone, Eq)]
 pub struct Rect {
@@ -179,6 +180,25 @@ impl Rect {
         self.scale_y(mag, max_y);
 
         *self
+    }
+
+    pub fn stretch(&mut self, mags: [f32; 4]) -> &mut Rect {
+        let [dxl, dxr, dyt, dyb] = mags;
+
+        let center = self.center();
+
+        let left = (center.x - mult(center.x - self.left(), dxl)).max(0);
+        let right = center.x + mult(self.right() - center.x, dxr);
+        let top = (center.y - mult(center.y - self.top(), dyt)).max(0);
+        let bottom = center.y + mult(self.bottom() - center.y, dyb);
+
+        self.h = bottom - top;
+        self.y = (top + self.h) / 2;
+
+        self.w = right - left;
+        self.x = (left + self.w) / 2;
+
+        self
     }
 
     pub fn from_tl(x: u32, y: u32, w: u32, h: u32) -> Rect {

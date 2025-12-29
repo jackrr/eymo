@@ -63,6 +63,7 @@ Operation: Operation = {
 		"brighten(" <f:Float> ")" => Operation::Brightness(f),
 		"saturate(" <f:Float> ")" => Operation::Saturation(f),
 		"channels(" <r:Float> r" *, *" <g:Float> r" *, *" <b:Float> ")" => Operation::Chans(<>),
+		"reshape(" <dxl:Float> r" *, *" <dxr:Float> r" *, *" <dyt:Float> r" *, *" <dyb:Float> ")" => Operation::Reshape(<>),
 };
 
 FlipVariant: FlipVariant = {

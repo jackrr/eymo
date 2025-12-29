@@ -38,9 +38,21 @@ impl From<Rect> for Shape {
     }
 }
 
+impl From<&mut Rect> for Shape {
+    fn from(r: &mut Rect) -> Shape {
+        Shape::Rect(r.to_owned())
+    }
+}
+
 impl From<Polygon> for Shape {
     fn from(n: Polygon) -> Shape {
         Shape::Polygon(n)
+    }
+}
+
+impl From<&mut Polygon> for Shape {
+    fn from(n: &mut Polygon) -> Shape {
+        Shape::Polygon(n.to_owned())
     }
 }
 
@@ -56,6 +68,13 @@ impl Shape {
         match self {
             Shape::Polygon(p) => p.center(),
             Shape::Rect(r) => r.center(),
+        }
+    }
+
+    pub fn stretch(&mut self, mags: [f32; 4]) -> Self {
+        match self {
+            Shape::Polygon(p) => p.stretch(mags).into(),
+            Shape::Rect(r) => r.stretch(mags).into(),
         }
     }
 

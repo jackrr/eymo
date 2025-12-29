@@ -1,2 +1,0 @@
-forehead: copy_to(reye)
-leye: swap_with(forehead), scale(1.3), saturate(1.5)

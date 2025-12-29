@@ -312,7 +312,7 @@ fn extract_results(
             &origin,
             run_rot,
         )
-        .stretch([1., 1., 1.9, 1.])
+        .stretch([1., 1., 2.2, 0.7])
         .to_owned(),
     })
 }

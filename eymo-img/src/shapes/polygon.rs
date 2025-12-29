@@ -1,6 +1,6 @@
 use super::point::Point;
-
 use super::rect::Rect;
+use super::util::{mult, rounded_div};
 
 #[derive(Debug, Clone)]
 pub struct Polygon {
@@ -54,7 +54,7 @@ impl Polygon {
 
         for p in self.points.iter_mut() {
             if p.x < center.x {
-                p.x = center.x - mult(center.x - p.x, dxl);
+                p.x = (center.x - mult(center.x - p.x, dxl)).max(0);
             }
 
             if p.x > center.x {
@@ -62,7 +62,7 @@ impl Polygon {
             }
 
             if p.y < center.y {
-                p.y = center.y - mult(center.y - p.y, dyt);
+                p.y = (center.y - mult(center.y - p.y, dyt)).max(0);
             }
 
             if p.y > center.y {
@@ -83,14 +83,6 @@ impl From<Polygon> for Rect {
 
         Rect::from_tl(min_x, min_y, max_x - min_x, max_y - min_y)
     }
-}
-
-fn rounded_div(d: u32, q: u32) -> u32 {
-    (d as f32 / q as f32).round() as u32
-}
-
-fn mult(v: u32, f: f32) -> u32 {
-    (v as f32 * f).round() as u32
 }
 
 #[test]

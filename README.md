@@ -89,6 +89,7 @@ The set of available shapes are:
 - `face` - ...face
 - `nose` - ...nose
 - `mouth` - ...mouth
+- `forehead` - ...forehead
 
 Alternatively, custom rectangles can be used anywhere a built-in shape
 could be used:
@@ -113,6 +114,7 @@ spin(-0.25) // rotate shape -90°/second (1.0 yields a full clockwise rotation e
 brighten(0.5) // brighten/darken shape by given factor (in this case darken by 50%)
 saturate(1.5) // increase/decrease saturation of shape by given factor (in this case saturate by 150%)
 channels(1.5, 0.5, 0.8) // increase/decrease rgb levels by given factors (in this case 150% red, 50% green, 80% blue)
+reshape(0.9, 1.1, 2, 0.5) // scales source shape by dxl (0.9), dxr (1.1), dyt (2), dyb (0.5)
 ```
 
 ## Navigating the codebase
